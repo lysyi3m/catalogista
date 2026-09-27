@@ -1,4 +1,4 @@
-import RecogsKit
+import CatalogistaKit
 import SwiftUI
 
 #if os(macOS)
@@ -40,7 +40,7 @@ final class MenuTrimmingAppDelegate: NSObject, NSApplicationDelegate {
 #endif
 
 @main
-struct RecogsApp: App {
+struct CatalogistaApp: App {
     /// A cache that will not open is unrecoverable, so it is a first-class startup state rather
     /// than a crash.
     private enum Startup {
@@ -67,7 +67,7 @@ struct RecogsApp: App {
         #if os(macOS)
         // One collection, one window. `Window` drops the window tab bar that `WindowGroup` brings
         // with it, and the `.newItem` group below replaces File ▸ New Window with Add Record….
-        Window("Recogs", id: "collection") {
+        Window("Catalogista", id: "collection") {
             rootView
                 // Below this the status bar runs out of room and the record count collides with
                 // the sync state: the density control, the centred count and the status need
@@ -89,7 +89,7 @@ struct RecogsApp: App {
 
             // App Review requires a privacy policy link inside the app (guideline 5.1.1(i)).
             // Replacing the group drops the default Help item on purpose: with no help book, it
-            // only shows "Help isn't available for Recogs."
+            // only shows "Help isn't available for Catalogista."
             CommandGroup(replacing: .help) {
                 Link("Privacy Policy", destination: AppLinks.privacyPolicy)
             }

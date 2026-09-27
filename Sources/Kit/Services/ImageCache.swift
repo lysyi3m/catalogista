@@ -17,7 +17,7 @@ typealias PlatformImage = NSImage
 /// from, and a request for a different URL downloads again — so the art follows Discogs, and an
 /// app that quits halfway through a sync cannot strand an old image.
 ///
-/// A file with no recorded source, cached before files recorded one, is downloaded again once.
+/// A file with no recorded source is downloaded again, because nothing shows which image it is.
 /// Until a download succeeds the file on disk is still served, so the collection stays browsable
 /// offline. There is no size-based eviction.
 ///
@@ -61,9 +61,7 @@ actor ImageCache {
         session: URLSession = .shared,
         maximumConcurrentDownloads: Int = 6
     ) {
-        let resolved = directory ?? Self.defaultDirectory()
-        if directory == nil { Self.migrateFromCachesDirectory(into: resolved) }
-        self.directory = resolved
+        self.directory = directory ?? Self.defaultDirectory()
         self.session = session
         self.maximumConcurrentDownloads = max(maximumConcurrentDownloads, 1)
     }
@@ -78,34 +76,7 @@ actor ImageCache {
     static func defaultDirectory() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL.temporaryDirectory
-        return base.appending(path: "Recogs/Images", directoryHint: .isDirectory)
-    }
-
-    /// Moves art left behind in the old Caches location, so an upgrade still has covers to show
-    /// offline. The moved files carry no recorded source, so each is downloaded again on first use
-    /// online. Runs once: the old directory is gone afterwards.
-    static func migrateFromCachesDirectory(into directory: URL) {
-        let manager = FileManager.default
-        guard let caches = manager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
-        let legacy = caches.appending(path: "Recogs/Images", directoryHint: .isDirectory)
-        guard manager.fileExists(atPath: legacy.path) else { return }
-
-        if manager.fileExists(atPath: directory.path) {
-            // Both exist, so merge rather than clobber what is already in the new location.
-            let contents = (try? manager.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil)) ?? []
-            for kind in contents {
-                let destination = directory.appending(path: kind.lastPathComponent, directoryHint: .isDirectory)
-                try? manager.createDirectory(at: destination, withIntermediateDirectories: true)
-                let files = (try? manager.contentsOfDirectory(at: kind, includingPropertiesForKeys: nil)) ?? []
-                for file in files {
-                    try? manager.moveItem(at: file, to: destination.appending(path: file.lastPathComponent))
-                }
-            }
-            try? manager.removeItem(at: legacy)
-        } else {
-            try? manager.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? manager.moveItem(at: legacy, to: directory)
-        }
+        return base.appending(path: "Catalogista/Images", directoryHint: .isDirectory)
     }
 
     /// Keeps the art out of iCloud and iTunes backups. It is several megabytes of data Discogs can
@@ -152,8 +123,8 @@ actor ImageCache {
         do {
             return try await fetch(remoteURL, to: destination)
         } catch {
-            // The file on disk is from another URL, or from before files recorded their source, so
-            // nothing vouches for it. It is still what the user saw last: offline, it stays on
+            // The file on disk is from another URL, or has no recorded source, so nothing vouches
+            // for it. It is still what the user saw last: offline, it stays on
             // screen until Discogs is reachable, like the rest of the cache.
             guard hasFile, FileManager.default.fileExists(atPath: destination.path) else { throw error }
             return destination
@@ -350,7 +321,7 @@ actor ImageCache {
 
     /// An extended attribute on each file, holding the URL it was downloaded from. It travels with
     /// the file through the atomic move, so the image and its source can never disagree.
-    private static let sourceAttribute = "com.mlkshkvch.recogs.source"
+    private static let sourceAttribute = "com.mlkshkvch.catalogista.source"
 
     nonisolated static func recordedSource(of file: URL) -> String? {
         let length = getxattr(file.path, sourceAttribute, nil, 0, 0, 0)

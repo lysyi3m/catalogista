@@ -1,7 +1,7 @@
 import DiscogsKit
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("Release detail cache")
 struct ReleaseDetailTests {
@@ -42,7 +42,7 @@ struct ReleaseDetailTests {
         // No token, so a stale copy cannot be refreshed from Discogs and the cached one is shown.
         let services = AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
-            tokenStore: TokenStore(service: "com.mlkshkvch.recogs.tests.\(UUID().uuidString)"),
+            tokenStore: TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)"),
             imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString))
         )
         try await services.store.upsertReleaseDetail(makeRelease(title: "First"))

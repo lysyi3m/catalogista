@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Recogs" width="128" height="128">
+  <img src="assets/icon.png" alt="Catalogista" width="128" height="128">
 </p>
 
-<h1 align="center">Recogs</h1>
+<h1 align="center">Catalogista</h1>
 
 <p align="center">
   Your Discogs record collection, native on Mac and iPhone. One shared SwiftUI
@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/lysyi3m/recogs/actions/workflows/ci.yml">
-    <img src="https://github.com/lysyi3m/recogs/actions/workflows/ci.yml/badge.svg" alt="CI">
+  <a href="https://github.com/lysyi3m/catalogista/actions/workflows/ci.yml">
+    <img src="https://github.com/lysyi3m/catalogista/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
 </p>
 
@@ -43,16 +43,16 @@ rejects them.
 ## Build & run
 
 ```bash
-brew install xcodegen  # one-time
-cp .env.example .env   # one-time; set DEVELOPMENT_TEAM to your Apple Team ID
-make generate          # regenerate Recogs.xcodeproj from project.yml
-open Recogs.xcodeproj  # then press ⌘R
+brew install xcodegen       # one-time
+cp .env.example .env        # one-time; set DEVELOPMENT_TEAM to your Apple Team ID
+make generate               # regenerate Catalogista.xcodeproj from project.yml
+open Catalogista.xcodeproj  # then press ⌘R
 ```
 
 Run `make` to list the other tasks (`test`, `build`, `build-ios`, `clean`).
 
-`Recogs.xcodeproj` is generated from [`project.yml`](project.yml); it is gitignored and must not
-be hand-edited. `make generate` projects `DEVELOPMENT_TEAM` from `.env` into
+`Catalogista.xcodeproj` is generated from [`project.yml`](project.yml); it is gitignored and must
+not be hand-edited. `make generate` projects `DEVELOPMENT_TEAM` from `.env` into
 `Config/Local.xcconfig`, so Xcode and `xcodebuild` sign with the same team.
 
 ## Connecting to Discogs
@@ -88,9 +88,9 @@ age.
 | Path | Purpose |
 | --- | --- |
 | `DiscogsKit/` | Swift package: API client, typed models, and header-aware rate limiter |
-| `Sources/Kit/` | `RecogsKit` — SwiftData cache, image cache, services, and the SwiftUI feature layer |
+| `Sources/Kit/` | `CatalogistaKit` — SwiftData cache, image cache, services, and the SwiftUI feature layer |
 | `Sources/App/` | The app target: `@main` and assets |
-| `Tests/` | `RecogsKit` unit tests (`@testable import RecogsKit`) |
+| `Tests/` | `CatalogistaKit` unit tests (`@testable import CatalogistaKit`) |
 | `Config/` | `Base.xcconfig`, the privacy manifest and the iOS entitlements; `make generate` writes the rest (git-ignored) |
 | `Scripts/` | `verify-installed.sh` — checks the simulator is running the build in DerivedData |
 
@@ -111,7 +111,7 @@ marketplace prices, and stats.
 
 ## Privacy
 
-Recogs collects no data and talks only to Discogs — see [PRIVACY.md](PRIVACY.md).
+Catalogista collects no data and talks only to Discogs — see [PRIVACY.md](PRIVACY.md).
 
 ## Discogs
 

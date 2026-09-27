@@ -1,7 +1,7 @@
 import DiscogsKit
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("Cache reset")
 @MainActor
@@ -10,7 +10,7 @@ struct CacheResetTests {
     private func makeServices() throws -> AppServices {
         AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
-            tokenStore: TokenStore(service: "com.mlkshkvch.recogs.tests.\(UUID().uuidString)"),
+            tokenStore: TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)"),
             imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString))
         )
     }

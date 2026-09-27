@@ -2,7 +2,7 @@ import DiscogsKit
 import Foundation
 import SwiftData
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("CollectionStore")
 struct CollectionStoreTests {

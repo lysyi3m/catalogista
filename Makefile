@@ -1,8 +1,8 @@
-# Recogs — common tasks.
+# Catalogista — common tasks.
 # Requires: xcodegen (brew install xcodegen)
 
-PROJECT := Recogs.xcodeproj
-SCHEME  := Recogs
+PROJECT := Catalogista.xcodeproj
+SCHEME  := Catalogista
 PACKAGE := DiscogsKit
 LOCAL_XCCONFIG := Config/Local.xcconfig
 TEAM_SETTING   := ^DEVELOPMENT_TEAM = [A-Z0-9]{10}$$
@@ -36,7 +36,7 @@ test: test-package test-app ## Run every test suite
 test-package: ## Run the DiscogsKit unit tests
 	swift test --package-path $(PACKAGE)
 
-test-app: generate ## Run the RecogsKit tests
+test-app: generate ## Run the CatalogistaKit tests
 	xcodebuild test -project "$(PROJECT)" -scheme "$(SCHEME)" \
 		-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
 

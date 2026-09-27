@@ -1,7 +1,7 @@
 import DiscogsKit
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("Sign out", .serialized)
 @MainActor
@@ -49,7 +49,7 @@ struct SignOutTests {
         URLProtocol.registerClass(SlowCollectionProtocol.self)
         defer { URLProtocol.unregisterClass(SlowCollectionProtocol.self) }
 
-        let tokenStore = TokenStore(service: "com.mlkshkvch.recogs.tests.\(UUID().uuidString)")
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
         try tokenStore.save("test-token")
         defer { try? tokenStore.delete() }
         let services = AppServices(

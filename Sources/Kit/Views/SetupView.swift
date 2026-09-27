@@ -60,7 +60,7 @@ struct SetupView: View {
                 .foregroundStyle(.primary)
 
             VStack(spacing: 6) {
-                Text("Welcome to Recogs")
+                Text("Welcome to Catalogista")
                     .font(titleFont)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.8)

@@ -12,16 +12,16 @@ set -eu
 
 UDID="${1:?usage: verify-installed.sh <udid> [--expect s] [--forbid s]}"
 shift
-BUNDLE_ID="com.mlkshkvch.recogs"
+BUNDLE_ID="com.mlkshkvch.catalogista"
 # The Debug simulator build of this checkout, wherever DerivedData put it. DERIVED_APP overrides.
 REPO="${0:A:h:h}"
 if [[ -z "${DERIVED_APP:-}" ]]; then
-  PRODUCTS=$(xcodebuild -project "$REPO/Recogs.xcodeproj" -scheme Recogs -configuration Debug \
+  PRODUCTS=$(xcodebuild -project "$REPO/Catalogista.xcodeproj" -scheme Catalogista -configuration Debug \
     -destination 'generic/platform=iOS Simulator' -showBuildSettings 2>/dev/null \
     | awk -F' = ' '/^ *BUILT_PRODUCTS_DIR = /{print $2; exit}')
-  [[ -n "$PRODUCTS" ]] || { print -u2 "FAIL: no Recogs.xcodeproj build settings — run make generate"; exit 1; }
+  [[ -n "$PRODUCTS" ]] || { print -u2 "FAIL: no Catalogista.xcodeproj build settings — run make generate"; exit 1; }
 fi
-BUILT="${DERIVED_APP:-$PRODUCTS/Recogs.app}"
+BUILT="${DERIVED_APP:-$PRODUCTS/Catalogista.app}"
 
 EXPECT=""
 FORBID=""
@@ -37,7 +37,7 @@ INSTALLED="$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" app)"
 
 fail() { print -u2 "FAIL: $1"; exit 1; }
 
-for binary in "Recogs" "Frameworks/RecogsKit.framework/RecogsKit"; do
+for binary in "Catalogista" "Frameworks/CatalogistaKit.framework/CatalogistaKit"; do
   [[ -f "$BUILT/$binary" ]] || fail "no built binary at $BUILT/$binary — build first"
   [[ -f "$INSTALLED/$binary" ]] || fail "no installed binary at $INSTALLED/$binary"
   if ! cmp -s "$BUILT/$binary" "$INSTALLED/$binary"; then
@@ -46,12 +46,12 @@ for binary in "Recogs" "Frameworks/RecogsKit.framework/RecogsKit"; do
 done
 
 if [[ -n "$EXPECT" ]]; then
-  strings "$INSTALLED/Frameworks/RecogsKit.framework/RecogsKit" "$INSTALLED/Recogs" \
+  strings "$INSTALLED/Frameworks/CatalogistaKit.framework/CatalogistaKit" "$INSTALLED/Catalogista" \
     | grep -qF -- "$EXPECT" || fail "installed binary does not contain \"$EXPECT\""
 fi
 
 if [[ -n "$FORBID" ]]; then
-  if strings "$INSTALLED/Frameworks/RecogsKit.framework/RecogsKit" "$INSTALLED/Recogs" \
+  if strings "$INSTALLED/Frameworks/CatalogistaKit.framework/CatalogistaKit" "$INSTALLED/Catalogista" \
     | grep -qF -- "$FORBID"; then
     fail "installed binary still contains \"$FORBID\""
   fi

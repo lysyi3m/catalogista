@@ -38,5 +38,5 @@ struct DiscogsCredit: View {
 
 /// Links the app publishes. Public so the macOS Help menu in the app target can use them.
 public enum AppLinks {
-    public static let privacyPolicy = URL(string: "https://github.com/lysyi3m/recogs/blob/master/PRIVACY.md")!
+    public static let privacyPolicy = URL(string: "https://github.com/lysyi3m/catalogista/blob/master/PRIVACY.md")!
 }
