@@ -1,12 +1,12 @@
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("TokenStore", .serialized)
 struct TokenStoreTests {
     /// A throwaway service name per test, so nothing here can touch the real stored token.
     private func makeStore() -> TokenStore {
-        TokenStore(service: "com.mlkshkvch.recogs.tests.\(UUID().uuidString)", account: "discogs-pat")
+        TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)", account: "discogs-pat")
     }
 
     @Test("A token round-trips through the Keychain")

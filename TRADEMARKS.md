@@ -1,11 +1,11 @@
 # Name and icon
 
 The code in this repository is under the MIT license in [LICENSE](LICENSE). That license lets you
-copy, change and redistribute the code. It gives no right to use the "Recogs" name or the app
+copy, change and redistribute the code. It gives no right to use the "Catalogista" name or the app
 icon to identify another app.
 
-- **Name.** Do not name or brand another app, including a fork, "Recogs", so that nobody mistakes
-  it for this one.
+- **Name.** Do not name or brand another app, including a fork, "Catalogista", so that nobody
+  mistakes it for this one.
 - **Icon.** The icon artwork (`assets/icon.png` and
   `Sources/App/Assets.xcassets/AppIcon.appiconset/`) is licensed separately: © 2026 Emil
   Kashkevich, all rights reserved.

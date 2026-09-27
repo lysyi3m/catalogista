@@ -36,7 +36,7 @@ struct CollectionPagingTests {
         configuration.protocolClasses = [SlowPagingProtocol.self]
         return DiscogsClient(
             token: "test",
-            configuration: DiscogsConfiguration(userAgent: "Recogs/1.0 +tests", perPage: 1),
+            configuration: DiscogsConfiguration(userAgent: "Catalogista/1.0 +tests", perPage: 1),
             session: URLSession(configuration: configuration)
         )
     }

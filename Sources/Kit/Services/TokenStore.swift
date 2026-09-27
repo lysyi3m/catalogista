@@ -20,7 +20,7 @@ struct TokenStore: Sendable {
     private let service: String
     private let account: String
 
-    init(service: String = "com.mlkshkvch.recogs", account: String = "discogs-pat") {
+    init(service: String = "com.mlkshkvch.catalogista", account: String = "discogs-pat") {
         self.service = service
         self.account = account
     }

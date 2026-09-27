@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("Token masking")
 struct TokenMaskingTests {

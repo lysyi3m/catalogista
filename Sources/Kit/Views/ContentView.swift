@@ -45,7 +45,7 @@ public struct ContentView: View {
                 // bottom bar rides up with them instead of staying at the window edge.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // First run has no collection to title, and "Collection" above "Welcome to
-                // Recogs" reads as a stray label.
+                // Catalogista" reads as a stray label.
                 .navigationTitle(services.hasToken ? "Collection" : "")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(services.hasToken ? .large : .inline)

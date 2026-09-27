@@ -1,7 +1,7 @@
 import DiscogsKit
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("Collection sync", .serialized)
 struct CollectionSyncTests {
@@ -69,7 +69,7 @@ struct CollectionSyncTests {
         configuration.protocolClasses = [StubProtocol.self]
         let client = DiscogsClient(
             token: "test",
-            configuration: DiscogsConfiguration(userAgent: "Recogs/1.0 +tests"),
+            configuration: DiscogsConfiguration(userAgent: "Catalogista/1.0 +tests"),
             session: URLSession(configuration: configuration)
         )
         let cache = ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString))

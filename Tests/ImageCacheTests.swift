@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("ImageCache")
 struct ImageCacheTests {
@@ -44,24 +44,6 @@ struct ImageCacheTests {
         // can open the app to a wall of placeholders with no way to get the art back.
         #expect(directory.path.contains("Application Support"))
         #expect(directory.path.contains("/Caches/") == false)
-    }
-
-    @Test("Art left in the old caches directory is moved, not re-downloaded")
-    func migratesFromCaches() throws {
-        let manager = FileManager.default
-        let caches = try #require(manager.urls(for: .cachesDirectory, in: .userDomainMask).first)
-        let legacy = caches.appending(path: "Recogs/Images/cover", directoryHint: .isDirectory)
-        try manager.createDirectory(at: legacy, withIntermediateDirectories: true)
-        let stranded = legacy.appending(path: "4242.img", directoryHint: .notDirectory)
-        try Data("cover".utf8).write(to: stranded)
-
-        let destination = URL.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        defer { try? manager.removeItem(at: destination) }
-        ImageCache.migrateFromCachesDirectory(into: destination)
-
-        #expect(manager.fileExists(atPath: destination.appending(path: "cover/4242.img").path))
-        #expect(manager.fileExists(atPath: caches.appending(path: "Recogs/Images").path) == false,
-                "the old location is left clean")
     }
 
     /// Serves a valid PNG, slowly, so downloads are still in flight when a test interrupts them.
@@ -150,7 +132,7 @@ struct ImageCacheTests {
     }
 
     private func temporaryDirectory() -> URL {
-        URL.temporaryDirectory.appending(path: "recogs-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        URL.temporaryDirectory.appending(path: "catalogista-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
     }
 
     @Test("An image is downloaded once and served from disk thereafter")
@@ -221,8 +203,8 @@ struct ImageCacheTests {
         let remote = URL(string: "https://i.discogs.com/3-cover.jpeg")!
         #expect(await cache.isCached(releaseID: 3, kind: .cover, source: remote) == false)
 
-        // Cached before files recorded their source: Discogs may have changed the cover since, so
-        // stamping it with today's URL could vouch for the wrong image forever.
+        // Discogs may have changed the cover since this file was written, so stamping it with
+        // today's URL could vouch for the wrong image forever.
         _ = try await cache.localURL(releaseID: 3, kind: .cover, remoteURL: remote)
         #expect(CountingProtocol.count(for: remote.absoluteString) == 1)
         #expect(ImageCache.recordedSource(of: file) == remote.absoluteString)
@@ -248,7 +230,7 @@ struct ImageCacheTests {
         #expect(ImageCache.recordedSource(of: file) == nil, "and the file is still not vouched for")
     }
 
-    /// A cover as an older build left it: in its slot, with no recorded source.
+    /// A cover in its slot with no recorded source.
     private func writeUnrecordedFile(in cache: ImageCache, releaseID: Int, contents: Data) async throws -> URL {
         let file = await cache.fileURL(releaseID: releaseID, kind: .cover)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)

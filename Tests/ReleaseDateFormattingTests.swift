@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("Released date formatting")
 struct ReleaseDateFormattingTests {

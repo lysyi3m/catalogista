@@ -1,10 +1,10 @@
-# Recogs — working rules for coding agents
+# Catalogista — working rules for coding agents
 
 Native macOS + iOS SwiftUI app for managing a personal record collection via the Discogs API.
 
 ## Ground rules
 
-Shared by `recogs`, `time-strip` and `pdf-unpack`. Where a repo-specific section below
+This section is shared word for word by every app in this family. Where a repo-specific section
 contradicts a rule here, the repo-specific rule wins — and say so when you notice it.
 
 - **One toolchain.** macOS 26+ (iOS 26+ where there is an iOS target), Swift 6 language mode,
@@ -41,15 +41,15 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
   platform-specific code only where the platforms genuinely differ.
 - `DiscogsKit`: local Swift package (URLSession + async/await, Codable models, header-aware
   rate limiter). `swift test --package-path DiscogsKit` runs its suite.
-- `RecogsKit` (`Sources/Kit`): SwiftData cache, image cache, services, and the SwiftUI feature
-  layer. The views live here too, so only `AppServices` and the root view need to be public and
-  the tests can run unhosted.
+- `CatalogistaKit` (`Sources/Kit`): SwiftData cache, image cache, services, and the SwiftUI
+  feature layer. The views live here too, so only `AppServices` and the root view need to be
+  public and the tests can run unhosted.
 - SwiftData for the metadata cache; on-disk image cache. No backend, no iCloud.
 
 ## Discogs API
 
 - Base `https://api.discogs.com`. Auth: Personal Access Token — `Authorization: Discogs token=<PAT>`.
-- Required `User-Agent: Recogs/1.0 +<contact>`; generic agents get throttled harder.
+- Required `User-Agent: Catalogista/1.0 +<contact>`; generic agents get throttled harder.
 - Rate limit: 60 req/min authenticated. Route every request through one central throttle that
   reads the `X-Discogs-Ratelimit*` headers, keeps a safety margin, and backs off on 429.
 - Cover art is exempt: the image CDN returns no rate-limit headers and does not consume the
@@ -102,10 +102,10 @@ commit `.env`.
   changing icon assets, render `NSWorkspace.shared.icon(forFile:)` for the built app and compare.
   `assets/icon.png` for the README is masked by hand — GitHub shows a PNG as-is.
 - **`PRIVACY.md` has a fixed URL.** App Store Connect, Help ▸ Privacy Policy, Settings ▸ About
-  and the setup screen point at `github.com/lysyi3m/recogs/blob/master/PRIVACY.md`
+  and the setup screen point at `github.com/lysyi3m/catalogista/blob/master/PRIVACY.md`
   (`AppLinks.privacyPolicy`). Never move or rename it, and keep its claims true of the code.
 - **Privacy manifest keys are unvalidated.** `plutil` and Xcode accept a wrong key silently.
   Check `Config/PrivacyInfo.xcprivacy` against Apple's documentation, not against a clean build.
 - `LD_RUNPATH_SEARCH_PATHS` carries a macOS-specific variant in `project.yml`. XcodeGen emits
   only the iOS rpath for a multiplatform target, and a macOS executable sits one level deeper.
-  Removing it makes the app abort at launch on `@rpath/RecogsKit.framework`.
+  Removing it makes the app abort at launch on `@rpath/CatalogistaKit.framework`.

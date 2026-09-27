@@ -290,7 +290,7 @@ struct AboutSettingsView: View {
     private static var appName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
-            ?? "Recogs"
+            ?? "Catalogista"
     }
 
     private static var version: String {

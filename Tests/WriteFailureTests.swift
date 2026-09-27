@@ -1,7 +1,7 @@
 import DiscogsKit
 import Foundation
 import Testing
-@testable import RecogsKit
+@testable import CatalogistaKit
 
 @Suite("Write failures", .serialized)
 @MainActor
@@ -91,7 +91,7 @@ struct WriteFailureTests {
     }
 
     private func makeServices() throws -> (services: AppServices, tokenStore: TokenStore) {
-        let tokenStore = TokenStore(service: "com.mlkshkvch.recogs.tests.\(UUID().uuidString)")
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
         try tokenStore.save("test-token")
         let services = AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),

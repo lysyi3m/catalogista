@@ -1,10 +1,10 @@
-# Recogs — XcodeGen project spec. Regenerate with `make generate`.
-# A multiplatform SwiftUI app over the RecogsKit framework and the local DiscogsKit package.
+# Catalogista — XcodeGen project spec. Regenerate with `make generate`.
+# A multiplatform SwiftUI app over the CatalogistaKit framework and the local DiscogsKit package.
 
-name: Recogs
+name: Catalogista
 
 options:
-  bundleIdPrefix: com.mlkshkvch.recogs
+  bundleIdPrefix: com.mlkshkvch.catalogista
   createIntermediateGroups: true
   developmentLanguage: en
   deploymentTarget:
@@ -32,7 +32,7 @@ targets:
   # Everything but the @main entry point: SwiftData cache, services, and the SwiftUI feature layer.
   # Keeping the views here too means only AppServices and the root view need to be public, and the
   # tests can run unhosted — no app launch, no sandbox, no signing.
-  RecogsKit:
+  CatalogistaKit:
     type: framework
     supportedDestinations: [macOS, iOS]
     sources:
@@ -45,23 +45,23 @@ targets:
         product: DiscogsKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.mlkshkvch.recogs.kit
+        PRODUCT_BUNDLE_IDENTIFIER: com.mlkshkvch.catalogista.kit
         GENERATE_INFOPLIST_FILE: YES
         DEFINES_MODULE: YES
 
-  Recogs:
+  Catalogista:
     type: application
     supportedDestinations: [macOS, iOS]
     sources:
       - Sources/App
       - Config/PrivacyInfo.xcprivacy
     dependencies:
-      - target: RecogsKit
+      - target: CatalogistaKit
     info:
       path: Config/Info.plist
       properties:
-        CFBundleDisplayName: Recogs
-        CFBundleName: Recogs
+        CFBundleDisplayName: Catalogista
+        CFBundleName: Catalogista
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSHumanReadableCopyright: "© 2026 Emil Kashkevich · MIT License"
@@ -79,55 +79,56 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
     entitlements:
-      path: Config/Recogs.entitlements
+      path: Config/Catalogista.entitlements
       properties:
         com.apple.security.app-sandbox: true
         # Discogs API and the image CDN.
         com.apple.security.network.client: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.mlkshkvch.recogs
+        PRODUCT_BUNDLE_IDENTIFIER: com.mlkshkvch.catalogista
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
         ENABLE_HARDENED_RUNTIME: YES
         # XcodeGen emits only the iOS rpath for a multiplatform target, but a macOS executable sits
         # in Contents/MacOS, one level below the embedded frameworks. Without the macOS variant the
-        # app launches straight into a dyld "Library not loaded: @rpath/RecogsKit.framework" abort.
+        # app launches straight into a dyld "Library not loaded: @rpath/CatalogistaKit.framework"
+        # abort.
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
         LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]: "$(inherited) @executable_path/../Frameworks"
         TARGETED_DEVICE_FAMILY: "1,2"
         # iOS needs application-identifier and keychain-access-groups for the Keychain, and macOS
         # rejects application-identifier outright, so the two platforms take different files.
-        CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: Config/Recogs-iOS.entitlements
-        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Config/Recogs-iOS.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: Config/Catalogista-iOS.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Config/Catalogista-iOS.entitlements
 
   # Not app-hosted: the runner is unsandboxed and needs no signing, which matters for the
   # Keychain-backed token store.
-  RecogsTests:
+  CatalogistaTests:
     type: bundle.unit-test
     supportedDestinations: [macOS, iOS]
     sources:
       - Tests
     dependencies:
-      - target: RecogsKit
+      - target: CatalogistaKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.mlkshkvch.recogs.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.mlkshkvch.catalogista.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
-  Recogs:
+  Catalogista:
     build:
       targets:
-        RecogsKit: all
-        Recogs: [run, profile, archive, analyze]
-        RecogsTests: [test]
+        CatalogistaKit: all
+        Catalogista: [run, profile, archive, analyze]
+        CatalogistaTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - RecogsTests
+        - CatalogistaTests
     archive:
       config: Release

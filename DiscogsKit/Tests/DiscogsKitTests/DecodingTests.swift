@@ -97,7 +97,7 @@ struct DecodingTests {
     @Test("Identity decodes the username the token belongs to")
     func identity() throws {
         let json = """
-        { "id": 1234, "username": "emil", "resource_url": "https://api.discogs.com/users/emil", "consumer_name": "Recogs" }
+        { "id": 1234, "username": "emil", "resource_url": "https://api.discogs.com/users/emil", "consumer_name": "Catalogista" }
         """
         let identity = try decode(Identity.self, from: json)
         #expect(identity.username == "emil")

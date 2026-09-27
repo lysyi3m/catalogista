@@ -37,4 +37,4 @@ Config/Local.xcconfig
 
 # ── Repo-specific ──
 # Hand-written, not generated: iOS needs entitlements macOS rejects.
-!Config/Recogs-iOS.entitlements
+!Config/Catalogista-iOS.entitlements

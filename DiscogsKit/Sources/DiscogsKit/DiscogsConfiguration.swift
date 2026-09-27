@@ -9,7 +9,7 @@ public struct DiscogsConfiguration: Sendable {
     /// API root. Discogs API v2.
     public var baseURL: URL
 
-    /// Value sent as `User-Agent`, e.g. `Recogs/1.0 +https://example.com`.
+    /// Value sent as `User-Agent`, e.g. `Catalogista/1.0 +https://example.com`.
     public var userAgent: String
 
     /// Page size for paginated endpoints. Discogs caps this at 100.
@@ -38,14 +38,14 @@ public struct DiscogsConfiguration: Sendable {
     }
 
     /// Contact published in the `User-Agent`, so Discogs can reach the app's author.
-    public static let contact = "https://github.com/lysyi3m/recogs"
+    public static let contact = "https://github.com/lysyi3m/catalogista"
 
     /// Builds the required `User-Agent` for a given app version and contact.
     public static func userAgent(
         appVersion: String = "1.0",
         contact: String = DiscogsConfiguration.contact
     ) -> String {
-        "Recogs/\(appVersion) +\(contact)"
+        "Catalogista/\(appVersion) +\(contact)"
     }
 }
 
