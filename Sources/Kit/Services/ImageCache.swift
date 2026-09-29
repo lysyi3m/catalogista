@@ -35,14 +35,23 @@ actor ImageCache {
     enum CacheError: Error, LocalizedError {
         case badResponse(status: Int)
         case notAnImage
+        case tooLarge
 
         var errorDescription: String? {
             switch self {
             case .badResponse(let status): return "Image request failed with HTTP \(status)."
             case .notAnImage: return "The downloaded file was not a decodable image."
+            case .tooLarge: return "The image is too large to cache."
             }
         }
     }
+
+    /// Far above any cover or release image Discogs serves (a 600px cover is about 100 KB), and
+    /// far below what would strain memory: the whole response is held before it is checked.
+    static let maximumBytes = 20 * 1024 * 1024
+    /// Checked from the image's header before it is decoded in full. A full decode of a larger
+    /// image costs hundreds of megabytes for a picture drawn a few hundred points wide.
+    static let maximumPixelDimension = 8000
 
     private let directory: URL
     private let session: URLSession
@@ -51,7 +60,25 @@ actor ImageCache {
     nonisolated let decoded: DecodedImageCache
 
     private var activeDownloads = 0
-    private var waiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
+    /// Downloads waiting for a slot, first come first served, covers on screen ahead of the
+    /// warmer's prefetch. Without the split a cover the user is looking at could queue behind the
+    /// whole collection.
+    private var visibleWaiters: [Waiter] = []
+    private var backgroundWaiters: [Waiter] = []
+
+    private struct Waiter {
+        let id: UUID
+        let destination: URL
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+
+    /// Who is waiting for an image, which sets its place in the queue.
+    enum Priority: Sendable {
+        /// A cover on screen.
+        case visible
+        /// A prefetch that nobody is looking at yet.
+        case background
+    }
     /// Coalesces concurrent requests for the same file so a cover is fetched once, not once per
     /// view.
     /// Keyed by destination; the source URL is kept so a request for a newer image never joins the
@@ -121,13 +148,18 @@ actor ImageCache {
     /// means Discogs changed the image, and the file is downloaded again. If that download fails,
     /// the file already on disk is returned.
     @discardableResult
-    func localURL(releaseID: Int, kind: Kind, remoteURL: URL) async throws -> URL {
+    func localURL(
+        releaseID: Int,
+        kind: Kind,
+        remoteURL: URL,
+        priority: Priority = .background
+    ) async throws -> URL {
         let destination = fileURL(releaseID: releaseID, kind: kind)
         let hasFile = FileManager.default.fileExists(atPath: destination.path)
         if hasFile, Self.recordedSource(of: destination) == remoteURL.absoluteString { return destination }
 
         do {
-            return try await fetch(remoteURL, to: destination)
+            return try await fetch(remoteURL, to: destination, priority: priority)
         } catch {
             // The file on disk is from another URL, or has no recorded source, so nothing vouches
             // for it. It is still what the user saw last: offline, it stays on
@@ -139,19 +171,23 @@ actor ImageCache {
 
     /// Downloads `remoteURL` into `destination`, sharing a download already in flight for the same
     /// source.
-    private func fetch(_ remoteURL: URL, to destination: URL) async throws -> URL {
+    private func fetch(_ remoteURL: URL, to destination: URL, priority: Priority) async throws -> URL {
         // A cancelled caller starts nothing. The download below is shared and does not inherit
         // the caller's cancellation, so a cancelled cover warmer would otherwise keep queuing them.
         try Task.checkCancellation()
         if let existing = inFlight[destination] {
-            if existing.source == remoteURL { return try await existing.task.value }
+            if existing.source == remoteURL {
+                // The warmer queued this one; now it is on screen.
+                if priority == .visible { promote(destination) }
+                return try await existing.task.value
+            }
             // Discogs changed the image while the old one was downloading. The newer request wins;
             // the older download must not land.
             existing.task.cancel()
         }
 
         let task = Task<URL, any Error> {
-            try await withConcurrencyLimit {
+            try await withConcurrencyLimit(priority: priority, destination: destination) {
                 try await download(remoteURL, to: destination)
             }
         }
@@ -162,8 +198,12 @@ actor ImageCache {
 
     /// Decodes a cached image, downsampled so a grid of hundreds of covers stays memory-bounded.
     func image(releaseID: Int, kind: Kind, remoteURL: URL, maximumPixelSize: CGFloat) async throws -> PlatformImage {
-        let url = try await localURL(releaseID: releaseID, kind: kind, remoteURL: remoteURL)
-        guard let cgImage = Self.downsample(at: url, maximumPixelSize: maximumPixelSize) else {
+        let url = try await localURL(releaseID: releaseID, kind: kind, remoteURL: remoteURL, priority: .visible)
+        // Off the actor, so the covers on screen decode side by side rather than one at a time.
+        let downsampled = await Task.detached(priority: .userInitiated) {
+            Self.downsample(at: url, maximumPixelSize: maximumPixelSize)
+        }.value
+        guard let cgImage = downsampled else {
             // An undecodable file is worse than none: it counts as cached until its URL changes.
             // Drop it so the next request downloads again.
             try? FileManager.default.removeItem(at: url)
@@ -240,10 +280,14 @@ actor ImageCache {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw CacheError.badResponse(status: http.statusCode)
         }
+        guard data.count <= Self.maximumBytes else { throw CacheError.tooLarge }
         // A 200 does not mean an image. CDNs answer with HTML error pages, empty bodies and
         // truncated responses, and a cached file is not fetched again while its URL stands — so
         // anything that is not a complete image must be rejected before it reaches the cache.
-        guard Self.isCompleteImage(data) else { throw CacheError.notAnImage }
+        // Off the actor: a full decode takes long enough to hold up every other cover's lookup.
+        guard await Task.detached(operation: { Self.isCompleteImage(data) }).value else {
+            throw CacheError.notAnImage
+        }
 
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
@@ -287,9 +331,20 @@ actor ImageCache {
                   [kCGImageSourceShouldCache: false] as CFDictionary
               ),
               CGImageSourceGetType(source) != nil,
-              CGImageSourceGetCount(source) > 0
+              CGImageSourceGetCount(source) > 0,
+              hasAcceptableSize(source)
         else { return false }
         return CGImageSourceCreateImageAtIndex(source, 0, nil) != nil
+    }
+
+    /// Reads the pixel size from the header alone. An image with no readable size is refused too:
+    /// the full decode that follows would find out the size the expensive way.
+    nonisolated static func hasAcceptableSize(_ source: CGImageSource) -> Bool {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int
+        else { return false }
+        return width <= maximumPixelDimension && height <= maximumPixelDimension
     }
 
     /// Waits for a download slot, and gives it up if the caller is cancelled.
@@ -298,7 +353,7 @@ actor ImageCache {
     /// task would sit here until some other download happened to finish. Sign-out and Reset Cache
     /// both need waiting work to stop promptly, so the wait is cancellable and the waiter removes
     /// itself.
-    private func acquireSlot() async throws {
+    private func acquireSlot(priority: Priority, destination: URL) async throws {
         try Task.checkCancellation()
         guard activeDownloads >= maximumConcurrentDownloads else {
             activeDownloads += 1
@@ -308,7 +363,11 @@ actor ImageCache {
         let id = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                waiters[id] = continuation
+                let waiter = Waiter(id: id, destination: destination, continuation: continuation)
+                switch priority {
+                case .visible: visibleWaiters.append(waiter)
+                case .background: backgroundWaiters.append(waiter)
+                }
             }
         } onCancel: {
             Task { await self.abandonSlot(id) }
@@ -318,21 +377,40 @@ actor ImageCache {
     }
 
     private func abandonSlot(_ id: UUID) {
-        waiters.removeValue(forKey: id)?.resume(throwing: CancellationError())
+        if let index = visibleWaiters.firstIndex(where: { $0.id == id }) {
+            visibleWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+        } else if let index = backgroundWaiters.firstIndex(where: { $0.id == id }) {
+            backgroundWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    /// Moves a queued prefetch of `destination` into the visible queue, behind the covers already
+    /// there.
+    private func promote(_ destination: URL) {
+        let promoted = backgroundWaiters.filter { $0.destination == destination }
+        guard !promoted.isEmpty else { return }
+        backgroundWaiters.removeAll { $0.destination == destination }
+        visibleWaiters.append(contentsOf: promoted)
     }
 
     /// Hands the slot to the next waiter rather than freeing and re-taking it, so the count cannot
     /// drift and a waiter cannot be skipped.
     private func releaseSlot() {
-        if let id = waiters.keys.first, let continuation = waiters.removeValue(forKey: id) {
-            continuation.resume()
+        if !visibleWaiters.isEmpty {
+            visibleWaiters.removeFirst().continuation.resume()
+        } else if !backgroundWaiters.isEmpty {
+            backgroundWaiters.removeFirst().continuation.resume()
         } else {
             activeDownloads -= 1
         }
     }
 
-    private func withConcurrencyLimit<T>(_ work: () async throws -> T) async throws -> T {
-        try await acquireSlot()
+    private func withConcurrencyLimit<T>(
+        priority: Priority,
+        destination: URL,
+        _ work: () async throws -> T
+    ) async throws -> T {
+        try await acquireSlot(priority: priority, destination: destination)
         defer { releaseSlot() }
         return try await work()
     }
@@ -346,8 +424,11 @@ actor ImageCache {
         let tasks = inFlight.values.map(\.task)
         inFlight.removeAll()
         for task in tasks { task.cancel() }
-        for waiter in waiters.values { waiter.resume(throwing: CancellationError()) }
-        waiters.removeAll()
+        for waiter in visibleWaiters + backgroundWaiters {
+            waiter.continuation.resume(throwing: CancellationError())
+        }
+        visibleWaiters.removeAll()
+        backgroundWaiters.removeAll()
         for task in tasks { _ = try? await task.value }
     }
 

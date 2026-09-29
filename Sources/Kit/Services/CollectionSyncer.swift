@@ -148,7 +148,9 @@ actor CollectionSyncer {
     @discardableResult
     func warmArtwork(_ targets: [ArtworkTarget]) async -> Int {
         await withTaskGroup(of: Bool.self) { group in
-            for target in targets {
+            // Two copies of one release share a cover; one download serves both.
+            var seen = Set<String>()
+            for target in targets where seen.insert("\(target.kind.rawValue)/\(target.releaseID)").inserted {
                 group.addTask { [imageCache] in
                     // Checked against the source, so art whose URL changed is downloaded again and
                     // covers follow Discogs on the same schedule as the rest of the collection.

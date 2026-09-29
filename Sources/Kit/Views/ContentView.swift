@@ -71,8 +71,35 @@ public struct ContentView: View {
         folders.first { $0.id == folderID }?.name ?? "Collection"
     }
 
-    private var folderCounts: [Int: Int] {
-        CollectionFolders.counts(of: allItems.lazy.map(\.folderID))
+    /// Copies per folder and the search's match count, kept rather than computed in the body. The
+    /// sidebar reads the counts once per folder, and a computed property would walk the whole
+    /// collection for each of them on every redraw.
+    @State private var folderCounts: [Int: Int] = [:]
+    @State private var matchCount = 0
+
+    /// What the counts depend on. A copy changes folder only in a sync, so the sync time stands in
+    /// for moves; adds and removes change the count.
+    private struct CountsKey: Hashable {
+        let itemCount: Int
+        let lastSyncedAt: Date?
+        let folderID: Int
+        let query: String
+    }
+
+    private var countsKey: CountsKey {
+        CountsKey(
+            itemCount: allItems.count,
+            lastSyncedAt: syncController.lastSyncedAt,
+            folderID: folderID,
+            query: searchQuery
+        )
+    }
+
+    private func recount() {
+        folderCounts = CollectionFolders.counts(of: allItems.lazy.map(\.folderID))
+        guard !searchQuery.isEmpty else { return }
+        let predicate = CachedCollectionItem.predicate(inFolder: folderID, matching: searchQuery)
+        matchCount = allItems.filter { (try? predicate.evaluate($0)) ?? false }.count
     }
 
     public var body: some View {
@@ -101,6 +128,7 @@ public struct ContentView: View {
             .onChange(of: folderID) {
                 if sidebarSelection != nil { sidebarSelection = folderID }
             }
+            .onChange(of: countsKey, initial: true) { recount() }
             .task {
                 if editor == nil { editor = services.makeEditor() }
                 // On-launch delta, skipped when a sync ran moments ago.
@@ -442,11 +470,6 @@ public struct ContentView: View {
 
     private var folderCount: Int {
         folderID == DiscogsFolder.all ? allItems.count : folderCounts[folderID] ?? 0
-    }
-
-    private var matchCount: Int {
-        let predicate = CachedCollectionItem.predicate(inFolder: folderID, matching: searchQuery)
-        return allItems.filter { (try? predicate.evaluate($0)) ?? false }.count
     }
 
     private var densityControls: some View {
