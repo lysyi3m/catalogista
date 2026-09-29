@@ -60,7 +60,9 @@ actor ImageCache {
 
     init(
         directory: URL? = nil,
-        session: URLSession = .shared,
+        // Ephemeral: the files here are the cache, and a second copy in the shared URL cache would
+        // survive disconnecting.
+        session: URLSession = URLSession(configuration: .ephemeral),
         maximumConcurrentDownloads: Int = 6,
         decoded: DecodedImageCache = DecodedImageCache()
     ) {
@@ -138,6 +140,9 @@ actor ImageCache {
     /// Downloads `remoteURL` into `destination`, sharing a download already in flight for the same
     /// source.
     private func fetch(_ remoteURL: URL, to destination: URL) async throws -> URL {
+        // A cancelled caller starts nothing. The download below is shared and does not inherit
+        // the caller's cancellation, so a cancelled cover warmer would otherwise keep queuing them.
+        try Task.checkCancellation()
         if let existing = inFlight[destination] {
             if existing.source == remoteURL { return try await existing.task.value }
             // Discogs changed the image while the old one was downloading. The newer request wins;

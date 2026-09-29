@@ -17,6 +17,14 @@ public final class AppServices {
     public let commands = AppCommands()
 
     private let tokenStore: TokenStore
+    /// How API requests are sent. Ephemeral, so no response outlives the process in a URL cache or
+    /// cookie store: disconnecting has to leave nothing of the collection behind (`PRIVACY.md`).
+    private let sessionConfiguration: URLSessionConfiguration
+
+    /// Bumped when the account disconnects. Work that started under an earlier value finished for
+    /// an account that is gone, and must not write to the cache. Checked on the main actor before
+    /// each write, which sign-out also runs on.
+    private(set) var accountGeneration = 0
 
     /// Non-nil once a token is available. First-run setup sets it; until then the app is in its
     /// no-token state and browses whatever the cache already holds.
@@ -65,14 +73,16 @@ public final class AppServices {
     init(
         modelContainer: ModelContainer,
         tokenStore: TokenStore = TokenStore(),
-        imageCache: ImageCache = ImageCache()
+        imageCache: ImageCache = ImageCache(),
+        sessionConfiguration: URLSessionConfiguration = .ephemeral
     ) {
         self.modelContainer = modelContainer
         self.tokenStore = tokenStore
         self.imageCache = imageCache
+        self.sessionConfiguration = sessionConfiguration
         self.store = CollectionStore(modelContainer: modelContainer)
         let storedToken = (try? tokenStore.read()).flatMap { $0 }
-        self.client = storedToken.map(Self.makeClient)
+        self.client = storedToken.map { Self.makeClient(token: $0, configuration: sessionConfiguration) }
         self.maskedToken = storedToken.map(Self.mask)
         self.accountUsername = UserDefaults.standard.string(forKey: Self.usernameKey)
     }
@@ -93,7 +103,7 @@ public final class AppServices {
     /// Keychain.
     @discardableResult
     func signIn(token: String) async throws -> Identity {
-        let candidate = Self.makeClient(token: token)
+        let candidate = Self.makeClient(token: token, configuration: sessionConfiguration)
         let identity = try await candidate.identity()
         try tokenStore.save(token)
         client = candidate
@@ -120,6 +130,7 @@ public final class AppServices {
         // client comes back, so the app is either signed in or signed out and never between.
         let previousClient = client
         client = nil
+        accountGeneration += 1
         await syncController.cancelAndWait()
         do {
             try await resetCache()
@@ -132,7 +143,7 @@ public final class AppServices {
         accountUsername = nil
         maskedToken = nil
         UserDefaults.standard.removeObject(forKey: Self.usernameKey)
-        UserDefaults.standard.removeObject(forKey: "lastSyncedAt")
+        syncController.forgetAccount()
     }
 
     func makeEditor() -> CollectionEditor {
@@ -155,10 +166,11 @@ public final class AppServices {
         return CollectionSyncer(client: client, store: store, imageCache: imageCache)
     }
 
-    private static func makeClient(token: String) -> DiscogsClient {
+    private static func makeClient(token: String, configuration: URLSessionConfiguration) -> DiscogsClient {
         DiscogsClient(
             token: token,
-            configuration: DiscogsConfiguration(userAgent: DiscogsUserAgent.value)
+            configuration: DiscogsConfiguration(userAgent: DiscogsUserAgent.value),
+            session: URLSession(configuration: configuration)
         )
     }
 }

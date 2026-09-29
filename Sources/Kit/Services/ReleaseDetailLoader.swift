@@ -46,6 +46,7 @@ final class ReleaseDetailLoader {
     func load(releaseID: Int) async {
         if let snapshot, Freshness.isFresh(snapshot.fetchedAt, now: now()) { return }
         if snapshot == nil { state = .loading }
+        let generation = services.accountGeneration
         var cached = snapshot
         do {
             if let stored = try await services.store.releaseDetail(releaseID: releaseID) {
@@ -60,6 +61,9 @@ final class ReleaseDetailLoader {
                 return
             }
             let release = try await client.release(id: releaseID)
+            // Disconnected while the request was out: the cache is cleared, and this release
+            // belongs to the account that is gone.
+            guard services.accountGeneration == generation else { return }
             state = .loaded(try await services.store.upsertReleaseDetail(release))
         } catch is CancellationError {
             // The record page was dismissed before the fetch finished.

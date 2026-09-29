@@ -112,9 +112,24 @@ final class SyncController {
     func cancelAndWait() async {
         warmingArtwork?.cancel()
         running?.cancel()
+        // Before waiting: the warmer's children wait on downloads the image cache shares between
+        // callers, which cancelling the warmer does not reach. Waiting first would wait for the
+        // whole cover backlog.
+        await services.imageCache.cancelInFlightDownloads()
         await warmingArtwork?.value
         _ = await running?.value
         warmingArtwork = nil
+    }
+
+    /// Clears everything learned from the disconnected account, so a new sign-in in the same
+    /// session starts as a first run: no sync date, summary, error or offline state carried over.
+    func forgetAccount() {
+        lastSyncedAt = nil
+        lastSummary = nil
+        errorMessage = nil
+        isOffline = false
+        progress = nil
+        UserDefaults.standard.removeObject(forKey: Self.lastSyncedKey)
     }
 
     enum ResetError: LocalizedError {
@@ -192,7 +207,7 @@ final class SyncController {
 
             // The collection is correct now. Covers are a pre-fetch — the grid loads what it shows
             // on demand — so they warm in the background rather than holding the sync open.
-            await startWarmingArtwork(summary.artwork, using: syncer)
+            startWarmingArtwork(summary.artwork, using: syncer)
             return true
         } catch is CancellationError {
             // The caller went away; not a failure worth surfacing.
@@ -206,18 +221,17 @@ final class SyncController {
         }
     }
 
-    /// Replaces the previous warmer, draining it first so its downloads cannot outlive it.
+    /// Replaces the previous warmer, cancelling it.
     ///
-    /// Dropping the reference without awaiting would leave an untracked task still writing image
-    /// files — which is exactly what sign-out and Reset Cache need not to happen.
+    /// Not drained: its children may be waiting on downloads a visible cover shares, and those
+    /// run to the end whoever cancels. Cancelled, it starts no new downloads. Sign-out and Reset
+    /// Cache stop the downloads themselves (`cancelAndWait`, `ImageCache.removeAll`), so nothing is
+    /// written for an account that is gone.
     private func startWarmingArtwork(
         _ targets: [CollectionSyncer.ArtworkTarget],
         using syncer: CollectionSyncer
-    ) async {
-        if let previous = warmingArtwork {
-            previous.cancel()
-            await previous.value
-        }
+    ) {
+        warmingArtwork?.cancel()
         warmingArtwork = Task { await syncer.warmArtwork(targets) }
     }
 }
