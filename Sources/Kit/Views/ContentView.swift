@@ -151,17 +151,16 @@ public struct ContentView: View {
         // Links rather than tagged labels: on iPhone a tagged row is not tappable, and a link is
         // what pushes the records from the folder list.
         List(selection: $sidebarSelection) {
-            NavigationLink(value: DiscogsFolder.all) {
-                Label("Collection", systemImage: "square.stack")
-            }
-            .badge(allItems.count)
+            SidebarRow(value: DiscogsFolder.all, title: "Collection", systemImage: "square.stack", count: allItems.count)
             if !folders.isEmpty {
                 Section("Folders") {
                     ForEach(folders) { folder in
-                        NavigationLink(value: folder.id) {
-                            Label(folder.name, systemImage: "folder")
-                        }
-                        .badge(folderCounts[folder.id] ?? 0)
+                        SidebarRow(
+                            value: folder.id,
+                            title: folder.name,
+                            systemImage: "folder",
+                            count: folderCounts[folder.id] ?? 0
+                        )
                     }
                 }
             }
@@ -515,6 +514,39 @@ extension View {
         scrollEdgeEffectStyle(.hard, for: .top)
         #else
         self
+        #endif
+    }
+}
+
+/// One sidebar entry and its record count.
+///
+/// On macOS the count is a badge, trailing the row the way Mail's are. On iOS a badge lands after
+/// the navigation chevron, so the count goes inside the row, before it, as in Settings. A zero is
+/// left out on both.
+private struct SidebarRow: View {
+    let value: Int
+    let title: String
+    let systemImage: String
+    let count: Int
+
+    var body: some View {
+        #if os(macOS)
+        NavigationLink(value: value) {
+            Label(title, systemImage: systemImage)
+        }
+        .badge(count)
+        #else
+        NavigationLink(value: value) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                if count > 0 {
+                    Text(count, format: .number)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
         #endif
     }
 }
