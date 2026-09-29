@@ -46,6 +46,12 @@ public struct ContentView: View {
         CollectionLayout(rawValue: layoutRaw) ?? .default
     }
 
+    /// Adding belongs to the collection, not to a record page. The add sheet is presented from the
+    /// collection, so a request made on a record page would otherwise wait and open on Back.
+    private var canAdd: Bool {
+        services.hasToken && selection == nil
+    }
+
     private var folders: [FolderSnapshot] {
         CollectionFolders.ordered(cachedFolders.map(\.snapshot))
     }
@@ -67,7 +73,10 @@ public struct ContentView: View {
         root
             // Menu commands act here, where the state they drive lives.
             .onChange(of: services.commands.addRequests) {
-                if services.hasToken { isAdding = true }
+                if canAdd { isAdding = true }
+            }
+            .onChange(of: canAdd, initial: true) {
+                services.commands.isAddAvailable = canAdd
             }
             .onChange(of: services.commands.syncRequests) {
                 if services.hasToken { Task { await syncController.sync() } }

@@ -10,6 +10,9 @@ public final class AppCommands {
     public private(set) var addRequests = 0
     public private(set) var syncRequests = 0
     public private(set) var findRequests = 0
+    /// Whether Add Record can run where the user is. The collection screen sets it, since only it
+    /// knows; the menu item reads it.
+    public internal(set) var isAddAvailable = false
 
     public init() {}
 
