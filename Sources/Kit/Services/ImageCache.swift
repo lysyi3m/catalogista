@@ -19,7 +19,8 @@ typealias PlatformImage = NSImage
 ///
 /// A file with no recorded source is downloaded again, because nothing shows which image it is.
 /// Until a download succeeds the file on disk is still served, so the collection stays browsable
-/// offline. There is no size-based eviction.
+/// offline. There is no size-based eviction; art of releases no longer in the collection is
+/// deleted after each complete sync (`prune(keeping:)`).
 ///
 /// Image requests do not pass through `RateLimiter`. Measured against the live API, `i.discogs.com`
 /// returns no `X-Discogs-Ratelimit*` headers and does not move the counter, so the CDN has its own
@@ -241,7 +242,7 @@ actor ImageCache {
         var byteCount: Int
     }
 
-    /// What is on disk. Used by diagnostics, not by any eviction policy — there is none.
+    /// What is on disk, for the cache summary in Settings.
     func statistics() -> Statistics {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
@@ -260,6 +261,26 @@ actor ImageCache {
     }
 
     func diskUsage() -> Int { statistics().byteCount }
+
+    /// Deletes the art of releases outside `releaseIDs`: removed records, and search results that
+    /// were looked at but never added. A download in flight is left alone; it lands for a release
+    /// someone is looking at.
+    @discardableResult
+    func prune(keeping releaseIDs: Set<Int>) -> Int {
+        let inFlightFiles = Set(inFlight.keys)
+        var removed = 0
+        for kind in [Kind.thumb, .cover] {
+            let folder = directory.appending(path: kind.rawValue, directoryHint: .isDirectory)
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            for file in files where file.pathExtension == "img" && !inFlightFiles.contains(file) {
+                guard let releaseID = Int(file.deletingPathExtension().lastPathComponent),
+                      !releaseIDs.contains(releaseID)
+                else { continue }
+                if (try? FileManager.default.removeItem(at: file)) != nil { removed += 1 }
+            }
+        }
+        return removed
+    }
 
     func removeAll() async throws {
         // Downloads first: otherwise one still in flight writes its file into the deleted

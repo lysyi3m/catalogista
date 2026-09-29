@@ -130,6 +130,22 @@ actor CollectionStore {
 
     // MARK: - Release detail
 
+    /// Every release the cache still holds a copy of, for dropping details and art of the rest.
+    func releaseIDs() throws -> Set<Int> {
+        Set(try modelContext.fetch(FetchDescriptor<CachedCollectionItem>()).map(\.releaseID))
+    }
+
+    /// Drops details of releases no cached copy belongs to: removed records, and releases opened
+    /// from search but never added.
+    @discardableResult
+    func pruneReleaseDetails(keeping releaseIDs: Set<Int>) throws -> Int {
+        let stale = try modelContext.fetch(FetchDescriptor<CachedReleaseDetail>())
+            .filter { !releaseIDs.contains($0.releaseID) }
+        for detail in stale { modelContext.delete(detail) }
+        try saveOrRollback()
+        return stale.count
+    }
+
     func releaseDetail(releaseID: Int) throws -> ReleaseDetailSnapshot? {
         try cachedReleaseDetail(releaseID: releaseID)?.snapshot
     }

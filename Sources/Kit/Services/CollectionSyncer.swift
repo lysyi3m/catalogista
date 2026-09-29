@@ -135,6 +135,12 @@ actor CollectionSyncer {
         let folders = try await client.folders(user: identity.username)
         try await store.replaceFolders(folders, keeping: seenFolderIDs)
 
+        // Only after a complete fetch, like pruning copies. Read from the store rather than the
+        // pages, so a copy added on this device while they came in keeps its art and details.
+        let keptReleases = try await store.releaseIDs()
+        try await store.pruneReleaseDetails(keeping: keptReleases)
+        await imageCache.prune(keeping: keptReleases)
+
         return Summary(
             username: identity.username,
             itemsSynced: itemsSynced,

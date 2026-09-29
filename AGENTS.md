@@ -84,7 +84,8 @@ EPs Discogs is full of. The label/catalogue/country block on the record page is 
   the collection's in the status line, a stale record's details on the record page.
 - Cache images on disk, keyed by release id and size. The grid and the record page both draw
   `cover_image` (600px, quality 90); the 150px thumb is a fallback and a row icon. A file is
-  fetched again only when its URL changes, never because it is old.
+  fetched again only when its URL changes, never because it is old. After each complete sync,
+  art and release details of releases no longer in the collection are deleted.
 - SwiftData holds every collection item so the collection is browsable offline.
 - Cover art lives in Application Support, not Caches, so the system cannot evict it.
 
