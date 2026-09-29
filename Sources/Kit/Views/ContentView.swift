@@ -17,6 +17,10 @@ public struct ContentView: View {
     /// with the folder list one step back. Back clears it; bound to the folder itself, which is
     /// never empty, Back would push the records again at once.
     @State private var sidebarSelection: Int?
+    #if os(iOS)
+    /// Room under the folder list, which pins its credit to the bottom edge. See `creditSlack(_:)`.
+    @State private var sidebarCreditSlack: CGFloat = 0
+    #endif
 
     @AppStorage("collectionSort") private var sortRaw = CollectionSortOption.default.rawValue
     @AppStorage("collectionSortDirection") private var directionRaw = CollectionSortOption.defaultOrder.rawValue
@@ -164,7 +168,21 @@ public struct ContentView: View {
                     }
                 }
             }
+            #if os(iOS)
+            // On iPhone the folder list is a screen of its own, with Discogs folder names and
+            // counts, so it carries its own credit. The macOS sidebar always sits beside the
+            // detail, which has one.
+            DiscogsCredit(
+                destination: DiscogsNotice.collectionURL(username: services.accountUsername),
+                slack: sidebarCreditSlack
+            )
+            .creditRow()
+            #endif
         }
+        #if os(iOS)
+        .contentMargins(.bottom, 0, for: .scrollContent)
+        .creditSlack($sidebarCreditSlack)
+        #endif
         #if os(macOS)
         .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         #endif

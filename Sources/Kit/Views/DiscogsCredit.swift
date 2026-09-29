@@ -66,6 +66,8 @@ struct DiscogsCredit: View {
                         .imageScale(.small)
                 }
             }
+            // Explicit: an iOS list row draws a link in the primary colour, like plain text.
+            .foregroundStyle(.tint)
             .accessibilityLabel("View on Discogs")
         }
         .font(.caption)
@@ -97,15 +99,10 @@ extension View {
     /// content can be stretched; a `List` cannot, and uses `creditSlack(_:)`.
     func creditViewport(_ height: Binding<CGFloat>) -> some View {
         onScrollGeometryChange(for: CGFloat.self) { geometry in
-            #if os(macOS)
-            // The detail column already ends at the toolbar and the status bar, yet the scroll view
-            // still reports both as insets. Subtracting them counts the bars twice, and the credit
-            // stops about 90pt short of the bottom edge.
+            // The container already ends at the toolbar and the bottom bar, yet the scroll view
+            // still reports both as insets, on macOS and iOS alike. Subtracting them counts the
+            // bars twice, and the credit stops short of the bottom edge.
             geometry.containerSize.height
-            #else
-            // On iPhone the content runs under the bars, so the insets are real.
-            geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom
-            #endif
         } action: { _, visible in
             height.wrappedValue = max(0, visible)
         }
