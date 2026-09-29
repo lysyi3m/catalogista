@@ -93,6 +93,20 @@ public final class AppServices {
         return "\(token.prefix(4))\(String(repeating: "•", count: 12))\(token.suffix(4))"
     }
 
+    /// Moves the cache's store files to the Trash, so a store that will not open can be rebuilt by
+    /// the next sync. The Keychain token is not touched. To the Trash rather than deleted: the
+    /// files are only a cache, but a user may still want them back.
+    nonisolated public static func discardModelStore() throws {
+        let store = ModelConfiguration().url
+        let folder = store.deletingLastPathComponent()
+        let name = store.lastPathComponent
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix(name) }
+        for file in files {
+            try FileManager.default.trashItem(at: file, resultingItemURL: nil)
+        }
+    }
+
     nonisolated public static func makeModelContainer(inMemory: Bool = false) throws -> ModelContainer {
         let schema = Schema([CachedCollectionItem.self, CachedReleaseDetail.self, CachedFolder.self])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)

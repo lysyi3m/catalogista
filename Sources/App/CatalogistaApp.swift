@@ -21,8 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @main
 struct CatalogistaApp: App {
-    /// A cache that will not open is unrecoverable, so it is a first-class startup state rather
-    /// than a crash.
+    /// A cache that will not open is a startup state rather than a crash, with a way out: try
+    /// again, or rebuild the cache from Discogs.
     private enum Startup {
         case ready(AppServices)
         case failed(String)
@@ -35,11 +35,15 @@ struct CatalogistaApp: App {
     #endif
 
     init() {
+        _startup = State(initialValue: Self.start())
+    }
+
+    private static func start() -> Startup {
         do {
             let container = try AppServices.makeModelContainer()
-            _startup = State(initialValue: .ready(AppServices(modelContainer: container)))
+            return .ready(AppServices(modelContainer: container))
         } catch {
-            _startup = State(initialValue: .failed(error.localizedDescription))
+            return .failed(error.localizedDescription)
         }
     }
 
@@ -114,11 +118,23 @@ struct CatalogistaApp: App {
                 .environment(services)
                 .modelContainer(services.modelContainer)
         case .failed(let message):
-            ContentUnavailableView(
-                "Cache Unavailable",
-                systemImage: "externaldrive.badge.xmark",
-                description: Text(message)
-            )
+            ContentUnavailableView {
+                Label("Cache Unavailable", systemImage: "externaldrive.badge.xmark")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Try Again") { startup = Self.start() }
+                // The cache holds nothing Discogs does not, so rebuilding loses nothing. The next
+                // sync downloads the collection; the token in the Keychain stays.
+                Button("Rebuild Cache") {
+                    do {
+                        try AppServices.discardModelStore()
+                        startup = Self.start()
+                    } catch {
+                        startup = .failed(error.localizedDescription)
+                    }
+                }
+            }
         }
     }
 }

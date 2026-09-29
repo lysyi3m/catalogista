@@ -268,6 +268,40 @@ struct CollectionSyncTests {
         #expect(try await store.itemCount() == 4, "copies that were never seen must not be pruned")
     }
 
+    @Test("A complete sync drops art and details of releases no longer in the collection")
+    func completeSyncPrunesUnusedFiles() async throws {
+        let store = try makeStore()
+        let (syncer, cache) = makeSyncerAndCache(store: store)
+
+        StubProtocol.serve(instanceIDs: [1], claimingItems: 1)
+        _ = try await syncer.reconcile()
+        // Release 500 is in the collection; 900 was only looked at in search.
+        for releaseID in [500, 900] {
+            let file = await cache.fileURL(releaseID: releaseID, kind: .cover)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("art".utf8).write(to: file)
+        }
+
+        _ = try await syncer.reconcile()
+        #expect(await cache.isCached(releaseID: 500, kind: .cover))
+        #expect(await cache.isCached(releaseID: 900, kind: .cover) == false)
+    }
+
+    @Test("An incomplete sync deletes no art")
+    func incompleteSyncKeepsFiles() async throws {
+        let store = try makeStore()
+        let (syncer, cache) = makeSyncerAndCache(store: store)
+        StubProtocol.serve(instanceIDs: [1], claimingItems: 1)
+        _ = try await syncer.reconcile()
+        let file = await cache.fileURL(releaseID: 900, kind: .cover)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("art".utf8).write(to: file)
+
+        StubProtocol.serve(instanceIDs: [], claimingItems: 1)
+        await #expect(throws: CollectionSyncer.SyncError.self) { _ = try await syncer.reconcile() }
+        #expect(await cache.isCached(releaseID: 900, kind: .cover))
+    }
+
     @Test("An emptied collection is still an emptied collection")
     func genuinelyEmptyCollectionPrunes() async throws {
         let store = try makeStore()

@@ -323,16 +323,29 @@ struct AddRecordView: View {
                         .rowHoverHighlight(id: result.id, hovered: $hoveredResultID)
                     }
                 }
-                VStack(spacing: 0) {
+                VStack(spacing: 8) {
                     if total > results.count {
                         Text("Showing \(results.count) of \(total) matches.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 24)
+                        if search?.hasMore == true {
+                            if search?.isLoadingMore == true {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Button("Show More") { search?.loadMore() }
+                                    .controlSize(.small)
+                            }
+                        }
                     }
-                    DiscogsCredit(destination: DiscogsNotice.searchURL(query: query), slack: resultsCreditSlack)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.top, total > results.count ? 24 : 0)
+                .creditRow()
+                // For what was searched, not what the field says now.
+                DiscogsCredit(
+                    destination: DiscogsNotice.searchURL(query: search?.submittedQuery ?? query),
+                    slack: resultsCreditSlack
+                )
                 .creditRow()
             }
             // The list's own trailing margin would add to the space the credit brings.
