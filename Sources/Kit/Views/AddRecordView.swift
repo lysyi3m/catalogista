@@ -23,6 +23,7 @@ struct AddRecordView: View {
     /// Room under short results, and the second step's visible height. Both keep the credit on
     /// the bottom edge. See `creditSlack(_:)` and `creditViewport(_:)`.
     @State private var resultsCreditSlack: CGFloat = 0
+    @State private var resultsCreditSpacing = ListCreditSpacing()
     @State private var confirmationViewportHeight: CGFloat = 0
     @State private var search: ReleaseSearchController?
     /// Shown when there is no client to search with, which is not a search failure.
@@ -344,13 +345,15 @@ struct AddRecordView: View {
                 // For what was searched, not what the field says now.
                 DiscogsCredit(
                     destination: DiscogsNotice.searchURL(query: search?.submittedQuery ?? query),
-                    slack: resultsCreditSlack
+                    slack: resultsCreditSlack,
+                    listTrailing: resultsCreditSpacing.trailing
                 )
-                .creditRow()
+                .creditRow(resultsCreditSpacing)
             }
             // The list's own trailing margin would add to the space the credit brings.
             .contentMargins(.bottom, 0, for: .scrollContent)
             .creditSlack($resultsCreditSlack)
+            .listCreditSpacing(resultsCreditSpacing)
             #if os(iOS)
             // The default grouped style insets the results into a card, which under the sheet's
             // own divider reads as a band of dead space. Search results belong flush to the edge.

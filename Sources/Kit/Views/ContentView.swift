@@ -20,6 +20,7 @@ public struct ContentView: View {
     #if os(iOS)
     /// Room under the folder list, which pins its credit to the bottom edge. See `creditSlack(_:)`.
     @State private var sidebarCreditSlack: CGFloat = 0
+    @State private var sidebarCreditSpacing = ListCreditSpacing()
     #endif
 
     @AppStorage("collectionSort") private var sortRaw = CollectionSortOption.default.rawValue
@@ -200,14 +201,16 @@ public struct ContentView: View {
             // detail, which has one.
             DiscogsCredit(
                 destination: DiscogsNotice.collectionURL(username: services.accountUsername),
-                slack: sidebarCreditSlack
+                slack: sidebarCreditSlack,
+                listTrailing: sidebarCreditSpacing.trailing
             )
-            .creditRow()
+            .creditRow(sidebarCreditSpacing)
             #endif
         }
         #if os(iOS)
         .contentMargins(.bottom, 0, for: .scrollContent)
         .creditSlack($sidebarCreditSlack)
+        .listCreditSpacing(sidebarCreditSpacing)
         #endif
         #if os(macOS)
         .navigationSplitViewColumnWidth(min: 180, ideal: 220)
