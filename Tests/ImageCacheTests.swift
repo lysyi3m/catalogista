@@ -67,7 +67,6 @@ struct ImageCacheTests {
         #expect(SlowProtocol.started(onHost: "priority.test") == ["/1.jpeg", "/4.jpeg", "/2.jpeg", "/3.jpeg"])
     }
 
-    /// A blank PNG of the given size.
     private static func png(width: Int, height: Int) throws -> Data {
         let context = try #require(CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -109,7 +108,6 @@ struct ImageCacheTests {
         #expect(directory.path.contains("/Caches/") == false)
     }
 
-    /// Serves a valid PNG, slowly, so downloads are still in flight when a test interrupts them.
     /// Serves a valid PNG, slowly, so downloads are still in flight when a test interrupts them.
     ///
     /// No shared on/off state: tests using it run in parallel, and one test's cancellation must
