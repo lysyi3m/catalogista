@@ -34,19 +34,27 @@ enum DiscogsNotice {
     }
 }
 
-/// "Data provided by Discogs.", and a link to the page the data came from.
+/// "Data provided by Discogs. View ↗", the link going to the page the data came from.
 ///
-/// The notice reads as a notice and the link says where it goes. The credit owns the space around
-/// it, the same above as below, so every screen ends the same way: content, space, credit, space.
-/// Callers place it flush against their content.
+/// One line, since it ends every screen. The notice reads as a notice; the arrow marks the link as
+/// leaving the app, and VoiceOver reads it in full. The credit owns the space around it, the same
+/// above as below, so every screen ends the same way: content, space, credit, space. Callers place
+/// it flush against their content.
 struct DiscogsCredit: View {
     let destination: URL
 
     var body: some View {
-        VStack(spacing: 4) {
+        HStack(spacing: 4) {
             Text("Data provided by Discogs.")
                 .foregroundStyle(.secondary)
-            Link("View on Discogs", destination: destination)
+            Link(destination: destination) {
+                HStack(spacing: 2) {
+                    Text("View")
+                    Image(systemName: "arrow.up.right")
+                        .imageScale(.small)
+                }
+            }
+            .accessibilityLabel("View on Discogs")
         }
         .font(.caption)
         .frame(maxWidth: .infinity)
