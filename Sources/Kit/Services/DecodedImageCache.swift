@@ -16,7 +16,7 @@ import Foundation
 /// keeps cannot be tested. A lock rather than an actor, so a view can read it synchronously while
 /// it is drawn.
 final class DecodedImageCache: @unchecked Sendable {
-    /// About 250 grid covers at the default size on a Retina display, or 80 at the largest.
+    /// About 450 grid covers at the default size on a Retina display, or 80 at the largest.
     static let defaultByteLimit = 100 * 1024 * 1024
 
     private struct Entry {

@@ -5,9 +5,6 @@ import SwiftUI
 import AppKit
 
 /// Refreshes the runtime app icon.
-///
-/// File ▸ New Window needs no handling here: the scene's `CommandGroup(replacing: .newItem)`
-/// replaces it with Add Record…, which takes ⌘N.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep AppKit's runtime icon in sync with the compiled asset catalog. During development,

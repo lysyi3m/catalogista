@@ -195,7 +195,7 @@ struct CollectionView: View {
         .detailScrollEdge()
     }
 
-    /// The empty states fill the window themselves, so only the scrolling layouts pass slack.
+    /// Only the list passes slack: the grid and the empty folder fill the window themselves.
     private func credit(slack: CGFloat = 0) -> some View {
         DiscogsCredit(
             destination: DiscogsNotice.collectionURL(username: services.accountUsername, folderID: folderID),

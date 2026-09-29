@@ -41,9 +41,9 @@ enum DiscogsNotice {
 /// above as below, so every screen ends the same way: content, space, credit, space. Callers place
 /// it flush against their content.
 ///
-/// On a scrolling screen, `slack` is the room left under content that does not fill the window
-/// (see `creditSlack(_:)`). It goes above the credit, so the credit sits on the bottom edge
-/// whatever the screen holds, and follows the content once it scrolls.
+/// In a list, `slack` is the room left under rows that do not fill the window (see
+/// `creditSlack(_:)`). It goes above the credit, so the credit sits on the bottom edge until the
+/// rows scroll. Other scroll views stretch their content instead (see `creditViewport(_:)`).
 struct DiscogsCredit: View {
     let destination: URL
     var slack: CGFloat = 0
@@ -90,7 +90,7 @@ extension View {
         }
     }
 
-    /// Measures a scroll view's visible height, inside its insets.
+    /// Measures a scroll view's visible height.
     ///
     /// Content given at least this height, with a flexible space before the credit, keeps the
     /// credit on the bottom edge until the content is tall enough to scroll. For scroll views whose

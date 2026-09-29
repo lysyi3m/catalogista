@@ -93,7 +93,7 @@ public struct ContentView: View {
             }
             .onAppear { sidebarSelection = folderID }
             // Follows the folder on screen, as when a remembered folder is gone and Collection
-            // stands in. Left empty while empty, so Back on iPhone stays on the folder list.
+            // stands in. Not set while nil, so Back on iPhone stays on the folder list.
             .onChange(of: folderID) {
                 if sidebarSelection != nil { sidebarSelection = folderID }
             }
@@ -148,8 +148,8 @@ public struct ContentView: View {
     }
 
     private var sidebar: some View {
-        // Links rather than tagged labels: on iPhone a tagged row is not tappable, and a link is
-        // what pushes the records from the folder list.
+        // Links rather than tagged labels: on iPhone a tagged row only selects, and a link is what
+        // pushes the records from the folder list.
         List(selection: $sidebarSelection) {
             SidebarRow(value: DiscogsFolder.all, title: "Collection", systemImage: "square.stack", count: allItems.count)
             if !folders.isEmpty {
