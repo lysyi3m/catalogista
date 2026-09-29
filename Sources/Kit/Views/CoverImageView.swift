@@ -30,7 +30,9 @@ struct CoverImageView: View {
 
     var body: some View {
         ZStack {
-            if let image {
+            // A cover decoded moments ago is drawn at once rather than after a load, so a cell
+            // recreated by a folder switch or a re-sort never starts on the placeholder.
+            if let image = memoryCached ?? image {
                 Image(platformImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -58,6 +60,18 @@ struct CoverImageView: View {
         (edge / 40).rounded(.up) * 40
     }
 
+    private var remote: URL? { remoteURL.flatMap(URL.init(string:)) }
+
+    private var memoryCached: PlatformImage? {
+        guard let remote else { return nil }
+        return services.imageCache.cachedImage(
+            releaseID: releaseID,
+            kind: kind,
+            remoteURL: remote,
+            maximumPixelSize: bucketedEdge * displayScale
+        )
+    }
+
     private struct TaskKey: Hashable {
         let releaseID: Int
         let kind: ImageCache.Kind
@@ -66,8 +80,13 @@ struct CoverImageView: View {
     }
 
     private func load() async {
-        guard let remoteURL, let url = URL(string: remoteURL) else {
+        guard let url = remote else {
             didFail = true
+            return
+        }
+        if let cached = memoryCached {
+            image = cached
+            didFail = false
             return
         }
         do {

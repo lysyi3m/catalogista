@@ -348,6 +348,57 @@ struct ImageCacheTests {
         #expect(image.size.width > 0)
     }
 
+    @Test("A decoded image is kept in memory for its source and size, and nothing else")
+    func keepsDecodedImagesInMemory() async throws {
+        CountingProtocol.reset()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        let remote = URL(string: "https://i.discogs.com/memory.jpeg")!
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 320) == nil)
+
+        _ = try await cache.image(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 320)
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 320) != nil)
+
+        // A replaced cover must go back through the disk cache, which fetches the new image.
+        let replaced = URL(string: "https://i.discogs.com/memory-v2.jpeg")!
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: replaced, maximumPixelSize: 320) == nil)
+        // A small decode is too coarse for a larger cell.
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 560) == nil)
+        #expect(cache.cachedImage(releaseID: 20, kind: .thumb, remoteURL: remote, maximumPixelSize: 320) == nil)
+    }
+
+    @Test("An older file served offline is not kept in memory as the new image")
+    func offlineFallbackIsNotKeptInMemory() async throws {
+        CountingProtocol.serve(body: Data("<html>unavailable</html>".utf8))
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        _ = try await writeUnrecordedFile(in: cache, releaseID: 21, contents: CountingProtocol.pngBytes)
+        let remote = URL(string: "https://i.discogs.com/21-new.jpeg")!
+
+        // The old cover is still drawn while Discogs is unreachable...
+        _ = try await cache.image(releaseID: 21, kind: .cover, remoteURL: remote, maximumPixelSize: 150)
+        // ...but held in memory under the new URL it would outlive the download of the new one.
+        #expect(cache.cachedImage(releaseID: 21, kind: .cover, remoteURL: remote, maximumPixelSize: 150) == nil)
+    }
+
+    @Test("Clearing the cache empties memory as well as disk")
+    func removeAllClearsMemory() async throws {
+        CountingProtocol.reset()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        let remote = URL(string: "https://i.discogs.com/cleared.jpeg")!
+        _ = try await cache.image(releaseID: 22, kind: .cover, remoteURL: remote, maximumPixelSize: 150)
+
+        try await cache.removeAll()
+        #expect(cache.cachedImage(releaseID: 22, kind: .cover, remoteURL: remote, maximumPixelSize: 150) == nil)
+    }
+
     @Test("Cached images decode, downsampled to the requested size")
     func downsamples() async throws {
         CountingProtocol.reset()
