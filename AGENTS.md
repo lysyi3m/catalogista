@@ -58,12 +58,16 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
   remove flow keys off `instance_id`, not `release_id`.
 - **The API Terms of Use require two notices.** The affiliation notice
   (`DiscogsNotice.affiliation`) appears in Settings ▸ About, on the setup screen and in the
-  README. `DiscogsCredit` ("Data provided by Discogs.") sits next to every view of Discogs data
-  and links to the discogs.com page that holds it. A new screen of Discogs data needs its own
-  credit.
+  README. `DiscogsCredit` ("Data provided by Discogs." and a "View on Discogs" link to the
+  discogs.com page that holds the data) ends every view of Discogs data. It owns the space
+  around it, so place it flush against the content; in a list, make it the last row with
+  `.creditRow()`. A new screen of Discogs data needs its own credit.
 
 ## Terminology
 
+- **Collection** — every record, and the top entry of the sidebar. Discogs' folder 0, "All".
+- **Folder** — a Discogs collection folder. Read-only here: created, renamed and deleted on
+  discogs.com. Uncategorized is pinned first; the rest sort by name.
 - **Record** — an item in the collection. Counts, empty states, `Add Record`.
 - **Release** — the edition on Discogs. Search and the add confirmation.
 - **Copy** — the instance the user owns. Removal flows.

@@ -1,3 +1,4 @@
+import DiscogsKit
 import SwiftUI
 
 /// The notices the Discogs API Terms of Use require.
@@ -7,12 +8,20 @@ import SwiftUI
 enum DiscogsNotice {
     static let affiliation = "This application uses Discogs’ API but is not affiliated with, sponsored or endorsed by Discogs. ‘Discogs’ is a trademark of Zink Media, LLC."
 
-    static func collectionURL(username: String?) -> URL {
+    /// The collection's page, or one folder's when `folderID` names a real folder.
+    static func collectionURL(username: String?, folderID: Int = DiscogsFolder.all) -> URL {
         guard let username,
               let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: "https://www.discogs.com/user/\(encoded)/collection")
+              var components = URLComponents(string: "https://www.discogs.com/user/\(encoded)/collection")
         else { return URL(string: "https://www.discogs.com")! }
-        return url
+        if folderID != DiscogsFolder.all {
+            components.queryItems = [URLQueryItem(name: "folder_id", value: String(folderID))]
+        }
+        return components.url ?? URL(string: "https://www.discogs.com")!
+    }
+
+    static func releaseURL(id: Int) -> URL {
+        URL(string: "https://www.discogs.com/release/\(id)")!
     }
 
     static func searchURL(query: String) -> URL {
@@ -25,14 +34,33 @@ enum DiscogsNotice {
     }
 }
 
-/// "Data provided by Discogs.", linked to the page the data came from.
+/// "Data provided by Discogs.", and a link to the page the data came from.
+///
+/// The notice reads as a notice and the link says where it goes. The credit owns the space around
+/// it, the same above as below, so every screen ends the same way: content, space, credit, space.
+/// Callers place it flush against their content.
 struct DiscogsCredit: View {
     let destination: URL
 
     var body: some View {
-        Link("Data provided by Discogs.", destination: destination)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        VStack(spacing: 4) {
+            Text("Data provided by Discogs.")
+                .foregroundStyle(.secondary)
+            Link("View on Discogs", destination: destination)
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+}
+
+extension View {
+    /// Places a credit as the last row of a list. A section footer adds insets of its own, which
+    /// would leave more space below the credit than above it.
+    func creditRow() -> some View {
+        listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }
 

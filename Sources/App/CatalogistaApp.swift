@@ -86,6 +86,8 @@ struct CatalogistaApp: App {
                 }
             }
             CommandGroup(replacing: .singleWindowList) {}
+            // View ▸ Show Sidebar, ⌃⌘S.
+            SidebarCommands()
 
             // App Review requires a privacy policy link inside the app (guideline 5.1.1(i)).
             // Replacing the group drops the default Help item on purpose: with no help book, it
@@ -99,7 +101,8 @@ struct CatalogistaApp: App {
                     Button("Sync Now") { services.commands.requestSync() }
                         .keyboardShortcut("r", modifiers: .command)
                     Divider()
-                    Button("Find in Collection") { services.commands.requestFind() }
+                    // Searches the folder on screen, so the item cannot name one.
+                    Button("Find") { services.commands.requestFind() }
                         .keyboardShortcut("f", modifiers: .command)
                 }
             }

@@ -1,7 +1,8 @@
 import DiscogsKit
+import SwiftData
 import SwiftUI
 
-/// Search Discogs, pick the exact release, confirm, add.
+/// Search Discogs and pick the exact release, then pick its folder and add it.
 ///
 /// Search runs on submit rather than per keystroke: the rate limit is 60 requests a minute, and
 /// typing a release title would spend most of it.
@@ -9,8 +10,14 @@ struct AddRecordView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
 
+    /// The folder on screen when the sheet opened, which the second step preselects.
+    let folderID: Int
+
+    @Query private var cachedFolders: [CachedFolder]
     @State private var query = ""
+    /// The release picked in the first step. While set, the sheet shows the second step.
     @State private var confirming: SearchResult?
+    @State private var targetFolderID = DiscogsFolder.uncategorized
     @State private var editor: CollectionEditor?
     @State private var hoveredResultID: Int?
     @State private var search: ReleaseSearchController?
@@ -36,19 +43,15 @@ struct AddRecordView: View {
         }
         .onDisappear { search?.cancel() }
         .collectionFailureAlert(editor)
-        .alert(
-            "Add this release?",
-            isPresented: Binding(
-                get: { confirming != nil },
-                set: { if !$0 { confirming = nil } }
-            ),
-            presenting: confirming
-        ) { result in
-            Button("Add") { Task { await add(result) } }
-            Button("Cancel", role: .cancel) {}
-        } message: { result in
-            Text(confirmationMessage(for: result))
-        }
+    }
+
+    private var targets: [FolderSnapshot] {
+        CollectionFolders.addTargets(cachedFolders.map(\.snapshot))
+    }
+
+    private func confirm(_ result: SearchResult) {
+        targetFolderID = CollectionFolders.addTarget(for: folderID, among: targets)
+        confirming = result
     }
 
     /// A macOS sheet has no navigation bar worth the name: a title strip, a search strip and a
@@ -57,13 +60,22 @@ struct AddRecordView: View {
     @ViewBuilder
     private var sheet: some View {
         #if os(macOS)
+        // The second step replaces the first in place. The search controller keeps its results,
+        // so Back returns to the same list.
         VStack(spacing: 0) {
-            header
-            Divider()
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            footer
+            if let confirming {
+                confirmation(for: confirming)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                confirmationFooter(for: confirming)
+            } else {
+                header
+                Divider()
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                footer
+            }
         }
         #else
         NavigationStack {
@@ -80,6 +92,20 @@ struct AddRecordView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+            .navigationDestination(item: $confirming) { result in
+                confirmation(for: result)
+                    .navigationTitle("Add Record")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            if editor?.isWorking == true {
+                                ProgressView()
+                            } else {
+                                addButton(for: result)
+                            }
+                        }
+                    }
+            }
         }
         #endif
     }
@@ -92,10 +118,6 @@ struct AddRecordView: View {
             searchField
             if let message = noTokenMessage {
                 banner(message)
-            }
-            if editor?.isWorking == true {
-                ProgressView("Adding…")
-                    .progressViewStyle(.linear)
             }
         }
         .padding(headerPadding)
@@ -126,7 +148,80 @@ struct AddRecordView: View {
         }
         .padding(12)
     }
+
+    /// Escape steps back to the results rather than closing the sheet, the way Back would.
+    private func confirmationFooter(for result: SearchResult) -> some View {
+        HStack {
+            Button("Back") { confirming = nil }
+                .keyboardShortcut(.cancelAction)
+                .disabled(editor?.isWorking ?? false)
+            Spacer()
+            if editor?.isWorking == true {
+                ProgressView().controlSize(.small)
+            }
+            addButton(for: result)
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(12)
+    }
     #endif
+
+    /// The release laid out the way its record page will show it, so the edition can be checked
+    /// before it is added, and the folder it goes into.
+    ///
+    /// Search carries a year but no release date, so Released is absent until the record page
+    /// fetches the release.
+    private func confirmation(for result: SearchResult) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 28) {
+                    ReleaseHeader(
+                        releaseID: result.id,
+                        cover: result.artwork,
+                        title: result.releaseTitle,
+                        artist: result.artistName ?? "Unknown artist",
+                        subtitle: ReleaseRow.details([
+                            result.year.map(String.init),
+                            result.formatDisplayName,
+                        ]),
+                        tags: result.genre + result.style
+                    )
+                    EditionFacts([
+                        (EditionFacts.label, result.label.first),
+                        (EditionFacts.catalogNumber, result.catno),
+                        (EditionFacts.country, result.country),
+                    ])
+                    PageSection("Folder") {
+                        Picker("Folder", selection: $targetFolderID) {
+                            ForEach(targets) { folder in
+                                Text(folder.name).tag(folder.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                    }
+                }
+                // The search results' credit is gone once this step replaces them.
+                DiscogsCredit(destination: DiscogsNotice.releaseURL(id: result.id))
+            }
+            .padding([.horizontal, .top], confirmationPadding)
+        }
+        .disabled(editor?.isWorking ?? false)
+    }
+
+    private var confirmationPadding: CGFloat {
+        #if os(macOS)
+        28
+        #else
+        20
+        #endif
+    }
+
+    private func addButton(for result: SearchResult) -> some View {
+        Button("Add") { Task { await add(result) } }
+            .disabled(editor?.isWorking ?? false)
+    }
 
     /// An explicit field and button rather than `.searchable`: the toolbar search field's submit
     /// action does not fire reliably inside a sheet on macOS, which left the view with no way to
@@ -213,22 +308,28 @@ struct AddRecordView: View {
             List {
                 Section {
                     ForEach(results) { result in
-                        Button { confirming = result } label: {
+                        Button { confirm(result) } label: {
                             SearchResultRow(result: result)
                         }
                         .buttonStyle(.plain)
                         .disabled(editor?.isWorking ?? false)
                         .rowHoverHighlight(id: result.id, hovered: $hoveredResultID)
                     }
-                } footer: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if total > results.count {
-                            Text("Showing \(results.count) of \(total) matches.")
-                        }
-                        DiscogsCredit(destination: DiscogsNotice.searchURL(query: query))
-                    }
                 }
+                VStack(spacing: 0) {
+                    if total > results.count {
+                        Text("Showing \(results.count) of \(total) matches.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 24)
+                    }
+                    DiscogsCredit(destination: DiscogsNotice.searchURL(query: query))
+                }
+                .creditRow()
             }
+            // The list's own trailing margin would add to the space the credit brings.
+            .contentMargins(.bottom, 0, for: .scrollContent)
             #if os(iOS)
             // The default grouped style insets the results into a card, which under the sheet's
             // own divider reads as a band of dead space. Search results belong flush to the edge.
@@ -237,17 +338,9 @@ struct AddRecordView: View {
         }
     }
 
-    /// Names the row that was tapped, in the words that row used: one line for the release, one
-    /// for the edition. Four separate lines read as a form rather than a sentence.
-    private func confirmationMessage(for result: SearchResult) -> String {
-        let release = "\(result.artistName ?? "Unknown artist") — \(result.releaseTitle)"
-        let details = result.editionDetails
-        return details.isEmpty ? release : "\(release)\n\(details)"
-    }
-
     private func add(_ result: SearchResult) async {
         guard let editor else { return }
-        if await editor.add(result) {
+        if await editor.add(result, folderID: targetFolderID) {
             dismiss()
         }
     }
@@ -269,12 +362,19 @@ private struct SearchResultRow: View {
 }
 
 private extension SearchResult {
+    /// The best artwork search offers, and the cache slot it belongs in. See
+    /// `CachedCollectionItem.artwork` for why the kind follows the URL.
+    var artwork: (url: String?, kind: ImageCache.Kind) {
+        if let coverImage, !coverImage.isEmpty { return (coverImage, .cover) }
+        return (thumb, .thumb)
+    }
+
     /// The details that separate one edition from another. Richer than the collection's row:
     /// picking the right one out of a page of near-identical results is what the label and catalog
     /// number are for.
     ///
-    /// The row and the confirmation both read this property, so the confirmation describes the
-    /// row that was tapped.
+    /// The results and the second step both draw `SearchResultRow`, so the second step describes
+    /// the row that was tapped.
     var editionDetails: String {
         ReleaseRow.details([
             year.map(String.init),

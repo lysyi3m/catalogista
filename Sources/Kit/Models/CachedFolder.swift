@@ -2,8 +2,9 @@ import DiscogsKit
 import Foundation
 import SwiftData
 
-/// A Discogs collection folder. The UI shows one flat collection. Folders are cached so a folder
-/// view needs no new sync path.
+/// A Discogs collection folder, refreshed with every sync. Read-only in the app: folders are
+/// created, renamed and deleted on discogs.com. `count` is Discogs' own; the sidebar counts the
+/// cached copies instead (`CollectionFolders.counts`).
 @Model
 final class CachedFolder {
     @Attribute(.unique) var id: Int

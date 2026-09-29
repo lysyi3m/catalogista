@@ -175,7 +175,7 @@ struct CollectionSettingsView: View {
     private func refreshSummary() async {
         summary = CacheSummary(
             items: (try? await services.store.itemCount()) ?? 0,
-            folders: (try? await services.store.folders().count) ?? 0,
+            folders: CollectionFolders.ordered((try? await services.store.folders()) ?? []).count,
             images: await services.imageCache.statistics()
         )
     }

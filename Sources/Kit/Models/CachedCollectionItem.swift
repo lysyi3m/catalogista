@@ -145,17 +145,19 @@ final class CachedCollectionItem {
         sortTitle = Self.sortKey(item.basicInformation.title)
     }
 
-    /// Matches a record against what was typed in the collection's search field.
+    /// Matches a record against the folder on screen and what was typed in the search field.
     ///
     /// Defined once and used both as the grid's fetch predicate and, evaluated in Swift, for the
-    /// count in the status bar, so the two can never disagree about what matched.
-    /// `localizedStandardContains` is the search users expect: case- and diacritic-insensitive,
-    /// so "bjork" finds "Björk".
-    static func searchPredicate(matching query: String) -> Predicate<CachedCollectionItem> {
-        #Predicate<CachedCollectionItem> { item in
-            query.isEmpty
-                || item.title.localizedStandardContains(query)
-                || item.artistName.localizedStandardContains(query)
+    /// count in the status bar, so the two can never disagree about what matched. Folder 0 is
+    /// Collection and matches every copy. `localizedStandardContains` is the search users expect:
+    /// case- and diacritic-insensitive, so "bjork" finds "Björk".
+    static func predicate(inFolder folderID: Int, matching query: String) -> Predicate<CachedCollectionItem> {
+        let all = DiscogsFolder.all
+        return #Predicate<CachedCollectionItem> { item in
+            (folderID == all || item.folderID == folderID)
+                && (query.isEmpty
+                    || item.title.localizedStandardContains(query)
+                    || item.artistName.localizedStandardContains(query))
         }
     }
 
