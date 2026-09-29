@@ -51,6 +51,7 @@ final class CollectionEditor {
         isWorking = true
         failure = nil
         defer { isWorking = false }
+        let generation = services.accountGeneration
 
         func rejected(_ error: any Error) {
             failure = Failure(
@@ -86,6 +87,9 @@ final class CollectionEditor {
                 releaseID: result.id
             )
         } catch {
+            // Disconnected while the request was out: the cache is cleared and there is nothing to
+            // settle or report.
+            guard !hasDisconnected(since: generation) else { return false }
             try? await services.store.deleteItem(instanceID: provisionalID)
             // Only a definite rejection means the copy is not on Discogs. Anything else may have
             // been applied before the answer went missing, so ask Discogs rather than guess —
@@ -97,6 +101,8 @@ final class CollectionEditor {
             return await reconcileAdd(of: result, folderID: folderID, knownCopies: copiesBefore, after: error)
         }
 
+        // The copy is on the old account's Discogs; this cache no longer belongs to it.
+        guard !hasDisconnected(since: generation) else { return true }
         do {
             try await services.store.reassignInstanceID(from: provisionalID, to: addition.instanceID)
         } catch {
@@ -106,7 +112,7 @@ final class CollectionEditor {
             return true
         }
 
-        await refine(releaseID: result.id, instanceID: addition.instanceID, client: client)
+        await refine(releaseID: result.id, instanceID: addition.instanceID, client: client, generation: generation)
         return true
     }
 
@@ -121,6 +127,7 @@ final class CollectionEditor {
         isWorking = true
         failure = nil
         defer { isWorking = false }
+        let generation = services.accountGeneration
 
         func rejected(_ error: any Error, title: String) {
             failure = Failure(
@@ -160,6 +167,9 @@ final class CollectionEditor {
             // back because the server said "no such copy" would undo a removal that has happened.
             return true
         } catch {
+            // Disconnected while the request was out: restoring would put the old account's copy
+            // into the cleared cache.
+            guard !hasDisconnected(since: generation) else { return false }
             guard (error as? DiscogsError)?.didNotReachDiscogs ?? false else {
                 // The delete may have been applied. Let Discogs settle it rather than restoring a
                 // copy that is no longer there.
@@ -169,6 +179,12 @@ final class CollectionEditor {
             try? await services.store.restore(snapshot)
             return false
         }
+    }
+
+    /// Whether the account disconnected after `generation` was read. A write that finishes after
+    /// that must not touch the cache, which sign-out has cleared.
+    private func hasDisconnected(since generation: Int) -> Bool {
+        services.accountGeneration != generation
     }
 
     // MARK: - Reconciliation
@@ -227,9 +243,10 @@ final class CollectionEditor {
 
     /// Best-effort accuracy pass. A failure here leaves the copy added with search-derived text,
     /// which the next full sync corrects anyway.
-    private func refine(releaseID: Int, instanceID: Int, client: DiscogsClient) async {
+    private func refine(releaseID: Int, instanceID: Int, client: DiscogsClient, generation: Int) async {
         do {
             let release = try await client.release(id: releaseID)
+            guard !hasDisconnected(since: generation) else { return }
             try await services.store.apply(release, toInstanceID: instanceID)
             try await services.store.upsertReleaseDetail(release)
         } catch {

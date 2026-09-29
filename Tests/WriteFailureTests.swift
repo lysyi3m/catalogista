@@ -6,8 +6,8 @@ import Testing
 @Suite("Write failures", .serialized)
 @MainActor
 struct WriteFailureTests {
-    /// Intercepts `URLSession.shared`, which is what `AppServices` builds its client on. Fails the
-    /// write once, then lets it through, so a retry has something different to find.
+    /// Stands in for Discogs in the session `makeServices` gives the client. Fails the write once,
+    /// then lets it through, so a retry has something different to find.
     final class FlakyProtocol: URLProtocol, @unchecked Sendable {
         nonisolated(unsafe) static var writeAttempts = 0
         /// How many writes fail before one is allowed through. A DELETE that meets a 5xx is
@@ -99,10 +99,13 @@ struct WriteFailureTests {
     private func makeServices() throws -> (services: AppServices, tokenStore: TokenStore) {
         let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
         try tokenStore.save("test-token")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FlakyProtocol.self]
         let services = AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
             tokenStore: tokenStore,
-            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString))
+            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
+            sessionConfiguration: configuration
         )
         return (services, tokenStore)
     }
@@ -139,8 +142,6 @@ struct WriteFailureTests {
         FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
         // Owned one copy before; Discogs ends up holding two, so the write did land.
         FlakyProtocol.collectionInstanceIDs = [111, 222]
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
@@ -157,8 +158,6 @@ struct WriteFailureTests {
         FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
         // Owned one copy before, and Discogs still holds exactly that one: the write was rejected.
         FlakyProtocol.collectionInstanceIDs = [111]
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
@@ -176,8 +175,6 @@ struct WriteFailureTests {
     func unconfirmedAddRetryKeepsFolder() async throws {
         FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
         FlakyProtocol.collectionInstanceIDs = []
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
@@ -195,8 +192,6 @@ struct WriteFailureTests {
     func failedRebuildIsReported() async throws {
         FlakyProtocol.reset()
         FlakyProtocol.failReads = true
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
@@ -218,8 +213,6 @@ struct WriteFailureTests {
     @Test("A removal Discogs has already applied is not undone")
     func removeOfMissingCopyIsSuccess() async throws {
         FlakyProtocol.reset(failureStatus: 404)
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
@@ -238,8 +231,6 @@ struct WriteFailureTests {
         FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
         // Discogs still holds the copy, so the delete did not land after all.
         FlakyProtocol.collectionInstanceIDs = [111]
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
@@ -257,8 +248,6 @@ struct WriteFailureTests {
         FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
         // The reconciliation sync cannot run either, so the outcome stays genuinely unknown.
         FlakyProtocol.failReads = true
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
@@ -274,8 +263,6 @@ struct WriteFailureTests {
     @Test("A rejected removal offers a retry that actually removes the copy")
     func failedRemoveRetries() async throws {
         FlakyProtocol.reset()
-        URLProtocol.registerClass(FlakyProtocol.self)
-        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
 
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
