@@ -120,6 +120,9 @@ final class SyncController {
     enum ResetError: LocalizedError {
         case noToken
         case unreachable(String)
+        /// The cache was cleared and the download did not finish. The collection on screen is
+        /// empty or partial until a sync succeeds.
+        case rebuildFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -127,6 +130,10 @@ final class SyncController {
                 return "No Discogs token."
             case .unreachable(let reason):
                 return "Nothing was deleted. \(reason)"
+            case .rebuildFailed(let reason):
+                return ["The cache was cleared, but the download did not finish.", reason, "Sync to try again."]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
             }
         }
     }
@@ -135,7 +142,8 @@ final class SyncController {
     ///
     /// Discogs is checked first, because the cache is the only copy of the collection this device
     /// has. Clearing it and then failing to download would leave nothing to browse — exactly when
-    /// the user is offline and the cache matters most.
+    /// the user is offline and the cache matters most. The check cannot promise the download will
+    /// work, so a failed download throws rather than reading as a rebuilt cache.
     ///
     /// `isSyncing` covers the whole operation, including the gap between the cache emptying and
     /// the download starting — otherwise the grid flashes its empty state in that window.
@@ -161,12 +169,11 @@ final class SyncController {
         activity = "Clearing cache…"
         try await services.resetCache()
         activity = "Downloading collection…"
-        // A failure here leaves an empty cache, so it is reported even when the cause is being
-        // offline.
-        _ = await runSync()
-        // On the collection screen being offline is a status line, not a failure: the cache is
-        // intact and still browsable.
-        if isOffline { errorMessage = nil }
+        // A failure here leaves an empty or partial cache, so it is a failure even when the cause
+        // is being offline, and the error stays on the collection screen too.
+        guard await runSync() else {
+            throw ResetError.rebuildFailed(errorMessage ?? "")
+        }
     }
 
     private func performSync() async -> Bool {

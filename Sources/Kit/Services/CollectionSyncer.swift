@@ -59,6 +59,19 @@ actor CollectionSyncer {
     /// - Parameter onProgress: called after each page so the UI can fill in during a first sync.
     @discardableResult
     func reconcile(onProgress: (@Sendable (Progress) -> Void)? = nil) async throws -> Summary {
+        // Writes made while the pages come in are recorded, so the reconciliation respects them.
+        await store.beginSync()
+        do {
+            let summary = try await fetchAndReconcile(onProgress: onProgress)
+            await store.endSync()
+            return summary
+        } catch {
+            await store.endSync()
+            throw error
+        }
+    }
+
+    private func fetchAndReconcile(onProgress: (@Sendable (Progress) -> Void)?) async throws -> Summary {
         let identity = try await client.identity()
 
         try await store.upsertFolders(try await client.folders(user: identity.username))
@@ -107,10 +120,13 @@ actor CollectionSyncer {
         // The cache is this device's only copy, so deletion needs more than the absence of an
         // error. A 200 that is short a page, or that carries an empty `releases` array, would
         // otherwise wipe a collection that is still there. Discogs is canonical only when its own
-        // item count matches what it actually sent.
+        // item count matches what it actually sent, counted as distinct copies: pages that shift
+        // while the collection changes can repeat a copy and skip another, and the rows would
+        // still add up.
         guard let reportedItems, let reportedPages,
-              pagesSeen >= reportedPages, itemsSynced == reportedItems else {
-            throw SyncError.incompleteCollection(seen: itemsSynced, expected: reportedItems ?? 0)
+              pagesSeen >= reportedPages, itemsSynced == reportedItems,
+              seenInstanceIDs.count == reportedItems else {
+            throw SyncError.incompleteCollection(seen: seenInstanceIDs.count, expected: reportedItems ?? 0)
         }
         let itemsRemoved = try await store.pruneItems(keeping: seenInstanceIDs)
         // Fetched again, so the list is at least as new as the copies: a folder created while the

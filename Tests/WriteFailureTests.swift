@@ -191,6 +191,30 @@ struct WriteFailureTests {
         #expect(FlakyProtocol.lastWritePath?.contains("/collection/folders/5/releases/500") == true)
     }
 
+    @Test("A reset whose download fails says so, rather than reporting a rebuilt cache")
+    func failedRebuildIsReported() async throws {
+        FlakyProtocol.reset()
+        FlakyProtocol.failReads = true
+        URLProtocol.registerClass(FlakyProtocol.self)
+        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        // The identity check passes; the collection itself does not come down.
+        do {
+            try await services.syncController.resetAndResync()
+            Issue.record("expected the rebuild to fail")
+        } catch let error as SyncController.ResetError {
+            guard case .rebuildFailed = error else {
+                Issue.record("expected rebuildFailed, got \(error)")
+                return
+            }
+        }
+        #expect(services.syncController.errorMessage != nil, "the collection screen must show it too")
+    }
+
     @Test("A removal Discogs has already applied is not undone")
     func removeOfMissingCopyIsSuccess() async throws {
         FlakyProtocol.reset(failureStatus: 404)

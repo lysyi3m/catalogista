@@ -67,8 +67,12 @@ struct CollectionSyncTests {
                      "labels":[],"formats":[],"genres":[],"styles":[]}}
                     """
                 }
+                // Echoes the page asked for: a fixed page number never reaches the last page, and
+                // the fetch would ask for the next one forever.
+                let page = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "page" }?.value ?? "1"
                 body = """
-                {"pagination":{"page":1,"pages":\(pages),"per_page":100,"items":\(items)},
+                {"pagination":{"page":\(page),"pages":\(pages),"per_page":100,"items":\(items)},
                  "releases":[\(releases.joined(separator: ","))]}
                 """
             }
@@ -245,6 +249,23 @@ struct CollectionSyncTests {
         StubProtocol.serve(instanceIDs: [1, 2], claimingItems: 2, folders: [(1, "Uncategorized")], copiesIn: 1)
         _ = try await syncer.reconcile()
         #expect(try await store.folders().map(\.id).sorted() == [1])
+    }
+
+    @Test("Pages that repeat one copy and skip another do not pass as complete")
+    func repeatedCopiesAreIncomplete() async throws {
+        let store = try makeStore()
+        let syncer = makeSyncer(store: store)
+
+        StubProtocol.serve(instanceIDs: [1, 2, 3, 4], claimingItems: 4)
+        _ = try await syncer.reconcile()
+
+        // Two pages of [1, 2]: four rows for four reported copies, but 3 and 4 were never seen.
+        // Counting rows would call this complete and prune them.
+        StubProtocol.serve(instanceIDs: [1, 2], claimingItems: 4, pages: 2)
+        await #expect(throws: CollectionSyncer.SyncError.self) {
+            _ = try await syncer.reconcile()
+        }
+        #expect(try await store.itemCount() == 4, "copies that were never seen must not be pruned")
     }
 
     @Test("An emptied collection is still an emptied collection")
