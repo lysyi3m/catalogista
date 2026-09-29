@@ -53,6 +53,6 @@ public struct DiscogsConfiguration: Sendable {
 public enum DiscogsFolder {
     /// Pseudo-folder spanning every item in the collection. Read-only: an add needs a real folder.
     public static let all = 0
-    /// The default real folder, and the target of every add.
+    /// The real folder every account has. An add targets it unless another folder is picked.
     public static let uncategorized = 1
 }

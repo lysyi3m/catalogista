@@ -24,10 +24,11 @@
 
 - **Cover wall** — scalable grid of cover art with a density slider, from large sleeves down to a tight wall.
 - **List** — the same collection as rows, each carrying artist, year and format, for finding rather than browsing.
+- **Folders** — your Discogs folders in a sidebar, each with the same views, sort and search as the whole collection.
 - **Sort** by date added, artist, title or year, in either direction.
-- **Search** the collection as you type, offline.
+- **Search** the collection or the open folder as you type, offline.
 - **Record detail** — full-size cover, edition details, tracklist, and a link out to Discogs.
-- **Add** — search Discogs, pick the exact release, confirm.
+- **Add** — search Discogs, pick the exact release, pick its folder.
 - **Remove** — from the detail screen, or a long press on any cover (right click on Mac).
 - **Offline** — the whole collection stays browsable from the local cache.
 
@@ -106,8 +107,8 @@ no token.
 ## Scope
 
 v1 is the flows above. Deliberately out of scope for now: barcode scanning,
-a zoomable infinite canvas, folder-aware UI, an offline edit queue, wantlist,
-marketplace prices, and stats.
+a zoomable infinite canvas, folder edits (create, rename, delete, move a copy),
+an offline edit queue, wantlist, marketplace prices, and stats.
 
 ## Privacy
 

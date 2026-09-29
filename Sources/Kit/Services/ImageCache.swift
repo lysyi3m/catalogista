@@ -47,6 +47,8 @@ actor ImageCache {
     private let directory: URL
     private let session: URLSession
     private let maximumConcurrentDownloads: Int
+    /// Read synchronously by views as they are drawn, so it sits outside the actor.
+    nonisolated let decoded: DecodedImageCache
 
     private var activeDownloads = 0
     private var waiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
@@ -59,11 +61,13 @@ actor ImageCache {
     init(
         directory: URL? = nil,
         session: URLSession = .shared,
-        maximumConcurrentDownloads: Int = 6
+        maximumConcurrentDownloads: Int = 6,
+        decoded: DecodedImageCache = DecodedImageCache()
     ) {
         self.directory = directory ?? Self.defaultDirectory()
         self.session = session
         self.maximumConcurrentDownloads = max(maximumConcurrentDownloads, 1)
+        self.decoded = decoded
     }
 
     /// Application Support, not Caches.
@@ -154,13 +158,37 @@ actor ImageCache {
     /// Decodes a cached image, downsampled so a grid of hundreds of covers stays memory-bounded.
     func image(releaseID: Int, kind: Kind, remoteURL: URL, maximumPixelSize: CGFloat) async throws -> PlatformImage {
         let url = try await localURL(releaseID: releaseID, kind: kind, remoteURL: remoteURL)
-        guard let image = Self.downsample(at: url, maximumPixelSize: maximumPixelSize) else {
+        guard let cgImage = Self.downsample(at: url, maximumPixelSize: maximumPixelSize) else {
             // An undecodable file is worse than none: it counts as cached until its URL changes.
             // Drop it so the next request downloads again.
             try? FileManager.default.removeItem(at: url)
             throw CacheError.notAnImage
         }
+        let image = Self.platformImage(cgImage)
+        // Not when the file is an older image served because the new one could not be fetched:
+        // held in memory under the new URL, it would stand in for the new image after it arrives.
+        if Self.recordedSource(of: url) == remoteURL.absoluteString {
+            decoded.insert(
+                image,
+                byteCount: cgImage.bytesPerRow * cgImage.height,
+                releaseID: releaseID,
+                kind: kind,
+                source: remoteURL,
+                maximumPixelSize: maximumPixelSize
+            )
+        }
         return image
+    }
+
+    /// The image `image(releaseID:kind:remoteURL:maximumPixelSize:)` decoded recently for the same
+    /// source and size, without touching the disk.
+    nonisolated func cachedImage(
+        releaseID: Int,
+        kind: Kind,
+        remoteURL: URL,
+        maximumPixelSize: CGFloat
+    ) -> PlatformImage? {
+        decoded.image(releaseID: releaseID, kind: kind, source: remoteURL, maximumPixelSize: maximumPixelSize)
     }
 
     struct Statistics: Sendable, Hashable {
@@ -192,6 +220,7 @@ actor ImageCache {
         // Downloads first: otherwise one still in flight writes its file into the deleted
         // directory, and the cache the user asked to clear is not empty.
         await cancelInFlightDownloads()
+        decoded.removeAll()
         guard FileManager.default.fileExists(atPath: directory.path) else { return }
         try FileManager.default.removeItem(at: directory)
     }
@@ -338,7 +367,7 @@ actor ImageCache {
 
     // MARK: - Decoding
 
-    nonisolated static func downsample(at url: URL, maximumPixelSize: CGFloat) -> PlatformImage? {
+    nonisolated static func downsample(at url: URL, maximumPixelSize: CGFloat) -> CGImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else { return nil }
 
@@ -349,8 +378,10 @@ actor ImageCache {
             kCGImageSourceThumbnailMaxPixelSize: max(maximumPixelSize, 1),
         ] as [CFString: Any] as CFDictionary
 
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
+    }
 
+    nonisolated static func platformImage(_ cgImage: CGImage) -> PlatformImage {
         #if canImport(UIKit)
         return UIImage(cgImage: cgImage)
         #elseif canImport(AppKit)

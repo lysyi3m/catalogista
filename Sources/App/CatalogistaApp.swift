@@ -4,13 +4,8 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-/// Refreshes the runtime app icon, and removes File ▸ New Window if SwiftUI adds one.
-///
-/// With a single `Window` scene, New Window would only re-focus the window that is already open.
-/// The item is matched on ⌘N rather than its localized title, and removed with the separator it
-/// leaves behind. Measured on macOS 26.7, the scene's `CommandGroup(replacing: .newItem)` already
-/// drops it, so this is a fallback.
-final class MenuTrimmingAppDelegate: NSObject, NSApplicationDelegate {
+/// Refreshes the runtime app icon.
+final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep AppKit's runtime icon in sync with the compiled asset catalog. During development,
         // Launch Services can otherwise retain the placeholder from an older build at this path.
@@ -19,21 +14,6 @@ final class MenuTrimmingAppDelegate: NSObject, NSApplicationDelegate {
         if let appIcon = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath).copy() as? NSImage {
             appIcon.size = NSSize(width: 512, height: 512)
             NSApp.applicationIconImage = appIcon
-        }
-
-        guard let fileMenu = NSApp.mainMenu?.items
-            .compactMap(\.submenu)
-            .first(where: { menu in
-                menu.items.contains { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }
-            })
-        else { return }
-
-        // Matched on the shortcut rather than the title, which is localized.
-        for item in fileMenu.items where item.keyEquivalent == "n" && item.keyEquivalentModifierMask == .command {
-            fileMenu.removeItem(item)
-        }
-        while fileMenu.items.first?.isSeparatorItem == true {
-            fileMenu.removeItem(at: 0)
         }
     }
 }
@@ -51,7 +31,7 @@ struct CatalogistaApp: App {
     @State private var startup: Startup
 
     #if os(macOS)
-    @NSApplicationDelegateAdaptor(MenuTrimmingAppDelegate.self) private var appDelegate
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
 
     init() {
@@ -83,9 +63,12 @@ struct CatalogistaApp: App {
                 if case .ready(let services) = startup {
                     Button("Add Record…") { services.commands.requestAdd() }
                         .keyboardShortcut("n", modifiers: .command)
+                        .disabled(!services.commands.isAddAvailable)
                 }
             }
             CommandGroup(replacing: .singleWindowList) {}
+            // View ▸ Show Sidebar, ⌃⌘S.
+            SidebarCommands()
 
             // App Review requires a privacy policy link inside the app (guideline 5.1.1(i)).
             // Replacing the group drops the default Help item on purpose: with no help book, it
@@ -99,7 +82,8 @@ struct CatalogistaApp: App {
                     Button("Sync Now") { services.commands.requestSync() }
                         .keyboardShortcut("r", modifiers: .command)
                     Divider()
-                    Button("Find in Collection") { services.commands.requestFind() }
+                    // Searches the folder on screen, so the item cannot name one.
+                    Button("Find") { services.commands.requestFind() }
                         .keyboardShortcut("f", modifiers: .command)
                 }
             }

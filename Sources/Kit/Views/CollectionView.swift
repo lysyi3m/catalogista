@@ -1,7 +1,8 @@
 import SwiftData
 import SwiftUI
 
-/// The collection, as a wall of covers or as rows, sorted on the store rather than in memory.
+/// The collection or one folder of it, as a wall of covers or as rows, sorted on the store
+/// rather than in memory.
 ///
 /// The sort lives in the `@Query` descriptor, so changing it re-fetches instead of re-sorting an
 /// array, and both layouts stay lazy.
@@ -9,6 +10,8 @@ struct CollectionView: View {
     @Environment(AppServices.self) private var services
     @Query private var items: [CachedCollectionItem]
 
+    private let folderID: Int
+    private let folderName: String
     private let layout: CollectionLayout
     /// Held only to notice a change: re-sorted rows make the old scroll position meaningless.
     private let sortSignature: String
@@ -19,8 +22,14 @@ struct CollectionView: View {
     private let onRequestRemove: (CachedCollectionItem) -> Void
 
     @State private var hoveredID: PersistentIdentifier?
+    /// Room under a short list, and the grid's visible height. Both keep the credit on the bottom
+    /// edge while the content is short. See `creditSlack(_:)` and `creditViewport(_:)`.
+    @State private var creditSlack: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
 
     init(
+        folderID: Int,
+        folderName: String,
         layout: CollectionLayout,
         sort: CollectionSortOption,
         direction: SortDirection,
@@ -32,8 +41,10 @@ struct CollectionView: View {
         var descriptor = FetchDescriptor<CachedCollectionItem>()
         descriptor.sortBy = sort.sortDescriptors(direction)
         // Filtering in the fetch rather than over the results keeps the grid lazy.
-        descriptor.predicate = CachedCollectionItem.searchPredicate(matching: searchQuery)
+        descriptor.predicate = CachedCollectionItem.predicate(inFolder: folderID, matching: searchQuery)
         _items = Query(descriptor)
+        self.folderID = folderID
+        self.folderName = folderName
         self.layout = layout
         self.sortSignature = "\(sort.rawValue).\(direction.rawValue)"
         self.searchQuery = searchQuery
@@ -44,7 +55,19 @@ struct CollectionView: View {
 
     var body: some View {
         if items.isEmpty, !searchQuery.isEmpty {
+            // Shows only the query, no Discogs data, so there is nothing to credit.
             ContentUnavailableView.search(text: searchQuery)
+        } else if items.isEmpty {
+            // Only a folder can be empty here: an empty collection never reaches this view.
+            ContentUnavailableView(
+                "No Records",
+                systemImage: "folder",
+                description: Text("Folder “\(folderName)” is empty.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The title still names a Discogs folder, so the credit stays, on the bottom edge as
+            // elsewhere. An overlay, so the message centres in the window like the no-match one.
+            .overlay(alignment: .bottom) { credit() }
         } else if layout == .list {
             list
         } else {
@@ -115,12 +138,13 @@ struct CollectionView: View {
                             #endif
                             .rowHoverHighlight(id: item.id, hovered: $hoveredID)
                     }
-                } footer: {
-                    // The list keeps trailing space under its last section, so padding the top
-                    // alone centres the credit between the last row and the window's bottom edge.
-                    credit.padding(.top, 14)
                 }
+                credit(slack: creditSlack).creditRow()
             }
+            // The list's own trailing margin would add to the space the credit brings.
+            .contentMargins(.bottom, 0, for: .scrollContent)
+            .creditSlack($creditSlack)
+            .detailScrollEdge()
             #if os(macOS)
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
@@ -142,30 +166,41 @@ struct CollectionView: View {
         showsCaption: Bool
     ) -> some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: spacing) {
-                ForEach(items) { item in
-                    Button { onSelect(item) } label: {
-                        CoverCell(item: item, edge: edge, showsCaption: showsCaption)
-                    }
-                    .buttonStyle(.plain)
-                    // Long press on iOS, right click on macOS.
-                    .contextMenu {
-                        Button("Open") { onSelect(item) }
-                        Divider()
-                        Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
-                            onRequestRemove(item)
+            // At least the visible height, so a short folder still ends on the bottom edge.
+            VStack(spacing: 0) {
+                LazyVGrid(columns: columns, spacing: spacing) {
+                    ForEach(items) { item in
+                        Button { onSelect(item) } label: {
+                            CoverCell(item: item, edge: edge, showsCaption: showsCaption)
+                        }
+                        .buttonStyle(.plain)
+                        // Long press on iOS, right click on macOS.
+                        .contextMenu {
+                            Button("Open") { onSelect(item) }
+                            Divider()
+                            Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
+                                onRequestRemove(item)
+                            }
                         }
                     }
                 }
+                // No bottom padding: the credit below brings its own space.
+                .padding([.horizontal, .top], spacing)
+                Spacer(minLength: 0)
+                credit()
             }
-            .padding(spacing)
-            credit.padding(.bottom, spacing)
+            .frame(minHeight: viewportHeight)
         }
+        .creditViewport($viewportHeight)
+        .detailScrollEdge()
     }
 
-    private var credit: some View {
-        DiscogsCredit(destination: DiscogsNotice.collectionURL(username: services.accountUsername))
-            .frame(maxWidth: .infinity)
+    /// Only the list passes slack: the grid and the empty folder fill the window themselves.
+    private func credit(slack: CGFloat = 0) -> some View {
+        DiscogsCredit(
+            destination: DiscogsNotice.collectionURL(username: services.accountUsername, folderID: folderID),
+            slack: slack
+        )
     }
 
     #if os(iOS)

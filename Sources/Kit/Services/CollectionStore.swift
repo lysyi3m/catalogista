@@ -141,7 +141,25 @@ actor CollectionStore {
         return try modelContext.fetch(descriptor).map(\.snapshot)
     }
 
-    func replaceFolders(_ folders: [Folder]) throws {
+    /// Inserts new folders and refreshes existing ones, dropping none.
+    ///
+    /// A sync applies this before it fetches the collection, so a copy that arrives in a new
+    /// folder has that folder to appear in. Dropping waits for `replaceFolders(_:keeping:)`.
+    func upsertFolders(_ folders: [Folder]) throws {
+        try applyFolders(folders, dropping: false, keeping: [])
+    }
+
+    /// Makes the cached folders `folders`, keeping any other that a cached copy still names.
+    ///
+    /// Only after a complete collection fetch: a folder dropped earlier would strand the copies
+    /// still filed in it if the fetch then failed. Even then the folder list and the collection are
+    /// separate requests, and a folder deleted between them is still named by copies from the
+    /// earlier one; it stays until a sync sees no copy in it.
+    func replaceFolders(_ folders: [Folder], keeping namedFolderIDs: Set<Int>) throws {
+        try applyFolders(folders, dropping: true, keeping: namedFolderIDs)
+    }
+
+    private func applyFolders(_ folders: [Folder], dropping: Bool, keeping namedFolderIDs: Set<Int>) throws {
         var existing = try Dictionary(
             modelContext.fetch(FetchDescriptor<CachedFolder>()).map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -153,7 +171,11 @@ actor CollectionStore {
                 modelContext.insert(CachedFolder(from: folder))
             }
         }
-        for stale in existing.values { modelContext.delete(stale) }
+        if dropping {
+            for stale in existing.values where !namedFolderIDs.contains(stale.id) {
+                modelContext.delete(stale)
+            }
+        }
         try modelContext.save()
     }
 

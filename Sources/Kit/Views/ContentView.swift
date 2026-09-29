@@ -7,6 +7,20 @@ public struct ContentView: View {
 
     private var syncController: SyncController { services.syncController }
     @Query private var allItems: [CachedCollectionItem]
+    @Query private var cachedFolders: [CachedFolder]
+
+    /// The folder last opened, restored at launch. `DiscogsFolder.all` is Collection.
+    @AppStorage("selectedFolder") private var storedFolderID = DiscogsFolder.all
+    @AppStorage("isSidebarVisible") private var isSidebarVisible = false
+    /// The sidebar's selected row, kept apart from the folder on screen. On iPhone the split view
+    /// is a stack, and a selected row is what shows the records: set at launch, it opens on them
+    /// with the folder list one step back. Back clears it; bound to the folder itself, which is
+    /// never empty, Back would push the records again at once.
+    @State private var sidebarSelection: Int?
+    #if os(iOS)
+    /// Room under the folder list, which pins its credit to the bottom edge. See `creditSlack(_:)`.
+    @State private var sidebarCreditSlack: CGFloat = 0
+    #endif
 
     @AppStorage("collectionSort") private var sortRaw = CollectionSortOption.default.rawValue
     @AppStorage("collectionSortDirection") private var directionRaw = CollectionSortOption.defaultOrder.rawValue
@@ -38,7 +52,141 @@ public struct ContentView: View {
         CollectionLayout(rawValue: layoutRaw) ?? .default
     }
 
+    /// Adding belongs to the collection, not to a record page. The add sheet is presented from the
+    /// collection, so a request made on a record page would otherwise wait and open on Back.
+    private var canAdd: Bool {
+        services.hasToken && selection == nil
+    }
+
+    private var folders: [FolderSnapshot] {
+        CollectionFolders.ordered(cachedFolders.map(\.snapshot))
+    }
+
+    /// The folder on screen. See `CollectionFolders.resolved` for why this never writes back.
+    private var folderID: Int {
+        CollectionFolders.resolved(storedFolderID, among: folders)
+    }
+
+    private var folderName: String {
+        folders.first { $0.id == folderID }?.name ?? "Collection"
+    }
+
+    private var folderCounts: [Int: Int] {
+        CollectionFolders.counts(of: allItems.lazy.map(\.folderID))
+    }
+
     public var body: some View {
+        root
+            // Menu commands act here, where the state they drive lives.
+            .onChange(of: services.commands.addRequests) {
+                if canAdd { isAdding = true }
+            }
+            .onChange(of: canAdd, initial: true) {
+                services.commands.isAddAvailable = canAdd
+            }
+            .onChange(of: services.commands.syncRequests) {
+                if services.hasToken { Task { await syncController.sync() } }
+            }
+            .onChange(of: services.commands.findRequests) {
+                if services.hasToken { isSearchFocused = true }
+            }
+            // A record page belongs to the folder it was opened from.
+            .onChange(of: folderID) { selection = nil }
+            .onChange(of: sidebarSelection) {
+                if let sidebarSelection { storedFolderID = sidebarSelection }
+            }
+            .onAppear { sidebarSelection = folderID }
+            // Follows the folder on screen, as when a remembered folder is gone and Collection
+            // stands in. Not set while nil, so Back on iPhone stays on the folder list.
+            .onChange(of: folderID) {
+                if sidebarSelection != nil { sidebarSelection = folderID }
+            }
+            .task {
+                if editor == nil { editor = services.makeEditor() }
+                // On-launch delta, skipped when a sync ran moments ago.
+                if syncController.shouldSyncOnLaunch { await syncController.sync() }
+                // Then re-sync whenever the collection passes six hours old, for as long as the
+                // window is open.
+                await syncController.keepFresh()
+            }
+            // Matches the record page: raised from a context menu, a confirmation dialog is
+            // presented as a popover anchored to that menu and inherits its width.
+            .alert(
+                "Remove this copy?",
+                isPresented: Binding(
+                    get: { pendingRemoval != nil },
+                    set: { if !$0 { pendingRemoval = nil } }
+                ),
+                presenting: pendingRemoval
+            ) { item in
+                Button("Remove from Collection", role: .destructive) {
+                    Task { await editor?.remove(instanceID: item.instanceID) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { item in
+                Text("\(item.artistName) — \(item.title)\nThis removes the copy from Discogs.")
+            }
+            .collectionFailureAlert(editor)
+    }
+
+    /// Onboarding has nothing to put in a sidebar, so the split view appears only with a token.
+    @ViewBuilder
+    private var root: some View {
+        if services.hasToken {
+            NavigationSplitView(columnVisibility: sidebarVisibility) {
+                sidebar
+            } detail: {
+                detail
+            }
+        } else {
+            detail
+        }
+    }
+
+    /// Remembered as shown or hidden. Every other visibility the system reports means shown.
+    private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { isSidebarVisible ? .all : .detailOnly },
+            set: { isSidebarVisible = $0 != .detailOnly }
+        )
+    }
+
+    private var sidebar: some View {
+        List(selection: $sidebarSelection) {
+            SidebarRow(value: DiscogsFolder.all, title: "Collection", systemImage: "square.stack", count: allItems.count)
+            if !folders.isEmpty {
+                Section("Folders") {
+                    ForEach(folders) { folder in
+                        SidebarRow(
+                            value: folder.id,
+                            title: folder.name,
+                            systemImage: "folder",
+                            count: folderCounts[folder.id] ?? 0
+                        )
+                    }
+                }
+            }
+            #if os(iOS)
+            // On iPhone the folder list is a screen of its own, with Discogs folder names and
+            // counts, so it carries its own credit. The macOS sidebar always sits beside the
+            // detail, which has one.
+            DiscogsCredit(
+                destination: DiscogsNotice.collectionURL(username: services.accountUsername),
+                slack: sidebarCreditSlack
+            )
+            .creditRow()
+            #endif
+        }
+        #if os(iOS)
+        .contentMargins(.bottom, 0, for: .scrollContent)
+        .creditSlack($sidebarCreditSlack)
+        #endif
+        #if os(macOS)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+        #endif
+    }
+
+    private var detail: some View {
         NavigationStack {
             content
                 // Without this the empty and loading states size to their own content, and the
@@ -46,7 +194,7 @@ public struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // First run has no collection to title, and "Collection" above "Welcome to
                 // Catalogista" reads as a stray label.
-                .navigationTitle(services.hasToken ? "Collection" : "")
+                .navigationTitle(services.hasToken ? folderName : "")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(services.hasToken ? .large : .inline)
                 // Where iOS puts sync state, the way Mail does. The phone has no status bar of its
@@ -59,15 +207,22 @@ public struct ContentView: View {
                 .modifier(
                     CollectionSearchField(
                         isEnabled: services.hasToken,
+                        prompt: "Find in \(folderName)",
                         text: $searchQuery,
                         isFocused: $isSearchFocused
                     )
                 )
+                #if os(macOS)
+                .modifier(WindowChrome(statusBar: statusBar))
+                #endif
                 .navigationDestination(item: $selection) { item in
                     RecordDetailView(item: item)
+                        #if os(macOS)
+                        .modifier(WindowChrome(statusBar: statusBar))
+                        #endif
                 }
                 .sheet(isPresented: $isAdding) {
-                    AddRecordView()
+                    AddRecordView(folderID: folderID)
                         .environment(services)
                         .modelContainer(services.modelContainer)
                 }
@@ -79,50 +234,6 @@ public struct ContentView: View {
                 }
                 #endif
         }
-        #if os(macOS)
-        .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        #endif
-        #if os(macOS)
-        // Outside the stack, so the status stays visible on the record page too.
-        .safeAreaInset(edge: .bottom) { statusBar }
-        #endif
-        // Menu commands act here, where the state they drive lives.
-        .onChange(of: services.commands.addRequests) {
-            if services.hasToken { isAdding = true }
-        }
-        .onChange(of: services.commands.syncRequests) {
-            if services.hasToken { Task { await syncController.sync() } }
-        }
-        .onChange(of: services.commands.findRequests) {
-            if services.hasToken { isSearchFocused = true }
-        }
-        .task {
-            if editor == nil { editor = services.makeEditor() }
-            // On-launch delta, skipped when a sync ran moments ago.
-            if syncController.shouldSyncOnLaunch { await syncController.sync() }
-            // Then re-sync whenever the collection passes six hours old, for as long as the
-            // window is open.
-            await syncController.keepFresh()
-        }
-        // Matches the record page: raised from a context menu, a confirmation dialog is presented
-        // as a popover anchored to that menu and inherits its width.
-        .alert(
-            "Remove this copy?",
-            isPresented: Binding(
-                get: { pendingRemoval != nil },
-                set: { if !$0 { pendingRemoval = nil } }
-            ),
-            presenting: pendingRemoval
-        ) { item in
-            Button("Remove from Collection", role: .destructive) {
-                Task { await editor?.remove(instanceID: item.instanceID) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { item in
-            Text("\(item.artistName) — \(item.title)\nThis removes the copy from Discogs.")
-        }
-        .collectionFailureAlert(editor)
     }
 
     @ViewBuilder
@@ -148,6 +259,8 @@ public struct ContentView: View {
             }
         } else {
             CollectionView(
+                folderID: folderID,
+                folderName: folderName,
                 layout: layout,
                 sort: sort,
                 direction: direction,
@@ -156,6 +269,9 @@ public struct ContentView: View {
                 onSelect: { selection = $0 },
                 onRequestRemove: { pendingRemoval = $0 }
             )
+            // A fresh view per folder, so a new folder opens at the top rather than at the
+            // previous folder's scroll offset.
+            .id(folderID)
             .refreshable { await syncController.sync() }
         }
     }
@@ -313,19 +429,23 @@ public struct ContentView: View {
             .lineLimit(1)
     }
 
-    /// Reads as a plain count normally, and says how much of the collection is showing while a
+    /// Reads as a plain count of the folder on screen, and says how much of it is showing while a
     /// search narrows it. Built as `Text` so the inflection markup is resolved.
     @ViewBuilder
     private var countLabel: some View {
         if searchQuery.isEmpty {
-            Text("^[\(allItems.count) record](inflect: true)")
+            Text("^[\(folderCount) record](inflect: true)")
         } else {
-            Text("\(matchCount) of \(allItems.count)")
+            Text("\(matchCount) of \(folderCount)")
         }
     }
 
+    private var folderCount: Int {
+        folderID == DiscogsFolder.all ? allItems.count : folderCounts[folderID] ?? 0
+    }
+
     private var matchCount: Int {
-        let predicate = CachedCollectionItem.searchPredicate(matching: searchQuery)
+        let predicate = CachedCollectionItem.predicate(inFolder: folderID, matching: searchQuery)
         return allItems.filter { (try? predicate.evaluate($0)) ?? false }.count
     }
 
@@ -384,19 +504,87 @@ public struct ContentView: View {
     #endif
 }
 
-/// The collection search field, present only once there is a collection to search.
+/// The macOS status bar, applied to each page of the detail stack.
+///
+/// A page pushed inside a split view's detail column does not inherit modifiers applied outside
+/// its `NavigationStack`, so the record page needs it as much as the collection does.
+#if os(macOS)
+private struct WindowChrome<StatusBar: View>: ViewModifier {
+    let statusBar: StatusBar
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom) { statusBar }
+    }
+}
+#endif
+
+extension View {
+    /// Keeps covers from showing through the macOS toolbar as they scroll under it.
+    ///
+    /// A hard scroll edge rather than an opaque toolbar background: the background spans the
+    /// window and cuts the top off the sidebar. Applied to each scroll view, because the style does
+    /// not reach a scroll view from a container around it.
+    func detailScrollEdge() -> some View {
+        #if os(macOS)
+        scrollEdgeEffectStyle(.hard, for: .top)
+        #else
+        self
+        #endif
+    }
+}
+
+/// One sidebar entry and its record count.
+///
+/// On macOS the count is a badge, trailing the row the way Mail's are. On iOS a badge lands after
+/// the navigation chevron, so the count goes inside the row, before it, as in Settings. A zero is
+/// left out on both.
+///
+/// A tagged label on macOS and a link on iOS. On iPhone a tagged row only selects, and a link is
+/// what pushes the records from the folder list. On macOS a link row reports no selection for the
+/// Collection row, so picking Collection after a folder left the folder on screen.
+private struct SidebarRow: View {
+    let value: Int
+    let title: String
+    let systemImage: String
+    let count: Int
+
+    var body: some View {
+        #if os(macOS)
+        Label(title, systemImage: systemImage)
+            .badge(count)
+            .tag(value)
+        #else
+        NavigationLink(value: value) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                if count > 0 {
+                    Text(count, format: .number)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+        #endif
+    }
+}
+
+/// The search field, present only once there is a collection to search. It searches the folder on
+/// screen, and the query stays as the user moves between folders.
 ///
 /// `.searchable` cannot be applied conditionally on its own. Applied unconditionally, it puts a
 /// search field on the onboarding screen, where there is nothing to search.
 private struct CollectionSearchField: ViewModifier {
     let isEnabled: Bool
+    let prompt: String
     @Binding var text: String
     var isFocused: FocusState<Bool>.Binding
 
     func body(content: Content) -> some View {
         if isEnabled {
             content
-                .searchable(text: $text, placement: .toolbar, prompt: "Find in Collection")
+                .searchable(text: $text, placement: .toolbar, prompt: Text(prompt))
                 .searchFocused(isFocused)
         } else {
             content

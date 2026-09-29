@@ -20,6 +20,9 @@ struct WriteFailureTests {
         /// When true, the collection endpoint fails, so a reconciliation sync cannot run.
         nonisolated(unsafe) static var failReads = false
 
+        /// The path of the latest write, to check which folder it targeted.
+        nonisolated(unsafe) static var lastWritePath: String?
+
         static func reset(failureStatus: Int = 403, writesToFail: Int = 1) {
             lock.withLock {
                 writeAttempts = 0
@@ -27,6 +30,7 @@ struct WriteFailureTests {
                 self.writesToFail = writesToFail
                 collectionInstanceIDs = []
                 failReads = false
+                lastWritePath = nil
             }
         }
 
@@ -48,8 +52,10 @@ struct WriteFailureTests {
                 status = 200
                 body = #"{"id":1,"username":"tester","resource_url":"https://api.discogs.com"}"#
             } else if isWrite {
+                let path = request.url?.path
                 let shouldFail = Self.lock.withLock { () -> Bool in
                     Self.writeAttempts += 1
+                    Self.lastWritePath = path
                     return Self.writeAttempts <= Self.writesToFail
                 }
                 status = shouldFail ? Self.lock.withLock({ Self.failureStatus }) : 204
@@ -164,6 +170,25 @@ struct WriteFailureTests {
         let failure = try #require(editor.failure)
         #expect(failure.retry != nil, "verified absent, so a retry is safe")
         #expect(try await services.store.itemCount() == 1)
+    }
+
+    @Test("Retrying an unconfirmed add targets the folder the user picked")
+    func unconfirmedAddRetryKeepsFolder() async throws {
+        FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
+        FlakyProtocol.collectionInstanceIDs = []
+        URLProtocol.registerClass(FlakyProtocol.self)
+        defer { URLProtocol.unregisterClass(FlakyProtocol.self) }
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+
+        let editor = services.makeEditor()
+        #expect(await editor.add(try makeSearchResult(), folderID: 5) == false)
+        let retry = try #require(editor.failure?.retry)
+
+        FlakyProtocol.lastWritePath = nil
+        await retry()
+        #expect(FlakyProtocol.lastWritePath?.contains("/collection/folders/5/releases/500") == true)
     }
 
     @Test("A removal Discogs has already applied is not undone")

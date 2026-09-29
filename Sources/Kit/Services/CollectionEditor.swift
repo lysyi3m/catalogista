@@ -94,7 +94,7 @@ final class CollectionEditor {
                 rejected(error)
                 return false
             }
-            return await reconcileAdd(of: result, knownCopies: copiesBefore, after: error)
+            return await reconcileAdd(of: result, folderID: folderID, knownCopies: copiesBefore, after: error)
         }
 
         do {
@@ -180,6 +180,7 @@ final class CollectionEditor {
     /// offering a retry that might duplicate the copy.
     private func reconcileAdd(
         of result: SearchResult,
+        folderID: Int,
         knownCopies: Set<Int>,
         after error: any Error
     ) async -> Bool {
@@ -199,7 +200,7 @@ final class CollectionEditor {
         failure = Failure(
             title: "Couldn't add \(result.title)",
             message: error.localizedDescription,
-            retry: { [weak self] in _ = await self?.add(result) }
+            retry: { [weak self] in _ = await self?.add(result, folderID: folderID) }
         )
         return false
     }

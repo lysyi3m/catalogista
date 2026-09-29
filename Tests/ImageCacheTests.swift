@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import CatalogistaKit
@@ -128,7 +129,12 @@ struct ImageCacheTests {
     private func makeCache(directory: URL) -> ImageCache {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [CountingProtocol.self]
-        return ImageCache(directory: directory, session: URLSession(configuration: configuration))
+        return ImageCache(
+            directory: directory,
+            session: URLSession(configuration: configuration),
+            // Memory pressure from the rest of the machine must not empty it mid-test.
+            decoded: DecodedImageCache(respondsToMemoryPressure: false)
+        )
     }
 
     private func temporaryDirectory() -> URL {
@@ -346,6 +352,97 @@ struct ImageCacheTests {
         // With the bad file gone the next request downloads a real image.
         let image = try await cache.image(releaseID: 14, kind: .thumb, remoteURL: remote, maximumPixelSize: 150)
         #expect(image.size.width > 0)
+    }
+
+    @Test("A decoded image is kept in memory for its source and size, and nothing else")
+    func keepsDecodedImagesInMemory() async throws {
+        CountingProtocol.reset()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        let remote = URL(string: "https://i.discogs.com/memory.jpeg")!
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 320) == nil)
+
+        _ = try await cache.image(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 320)
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 320) != nil)
+
+        // A replaced cover must go back through the disk cache, which fetches the new image.
+        let replaced = URL(string: "https://i.discogs.com/memory-v2.jpeg")!
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: replaced, maximumPixelSize: 320) == nil)
+        // A small decode is too coarse for a larger cell.
+        #expect(cache.cachedImage(releaseID: 20, kind: .cover, remoteURL: remote, maximumPixelSize: 560) == nil)
+        #expect(cache.cachedImage(releaseID: 20, kind: .thumb, remoteURL: remote, maximumPixelSize: 320) == nil)
+    }
+
+    @Test("An older file served offline is not kept in memory as the new image")
+    func offlineFallbackIsNotKeptInMemory() async throws {
+        CountingProtocol.serve(body: Data("<html>unavailable</html>".utf8))
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        _ = try await writeUnrecordedFile(in: cache, releaseID: 21, contents: CountingProtocol.pngBytes)
+        let remote = URL(string: "https://i.discogs.com/21-new.jpeg")!
+
+        // The old cover is still drawn while Discogs is unreachable...
+        _ = try await cache.image(releaseID: 21, kind: .cover, remoteURL: remote, maximumPixelSize: 150)
+        // ...but held in memory under the new URL it would outlive the download of the new one.
+        #expect(cache.cachedImage(releaseID: 21, kind: .cover, remoteURL: remote, maximumPixelSize: 150) == nil)
+    }
+
+    @Test("Clearing the cache empties memory as well as disk")
+    func removeAllClearsMemory() async throws {
+        CountingProtocol.reset()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        let remote = URL(string: "https://i.discogs.com/cleared.jpeg")!
+        _ = try await cache.image(releaseID: 22, kind: .cover, remoteURL: remote, maximumPixelSize: 150)
+
+        try await cache.removeAll()
+        #expect(cache.cachedImage(releaseID: 22, kind: .cover, remoteURL: remote, maximumPixelSize: 150) == nil)
+    }
+
+    @Test("Over its byte limit, memory drops the least recently drawn image first")
+    func evictsLeastRecentlyUsed() throws {
+        let decoded = DecodedImageCache(byteLimit: 10, respondsToMemoryPressure: false)
+        let image = try #require(Self.onePixelImage())
+        func url(_ name: String) -> URL { URL(string: "https://i.discogs.com/\(name).jpeg")! }
+        func insert(_ id: Int) {
+            decoded.insert(image, byteCount: 4, releaseID: id, kind: .cover, source: url("\(id)"), maximumPixelSize: 150)
+        }
+        func isKept(_ id: Int) -> Bool {
+            decoded.image(releaseID: id, kind: .cover, source: url("\(id)"), maximumPixelSize: 150) != nil
+        }
+
+        insert(1)
+        insert(2)
+        #expect(isKept(1), "drawing 1 again makes 2 the oldest")
+        insert(3)
+
+        #expect(isKept(1))
+        #expect(isKept(2) == false)
+        #expect(isKept(3))
+    }
+
+    @Test("An image larger than the whole memory budget is not kept")
+    func skipsOversizedImages() throws {
+        let decoded = DecodedImageCache(byteLimit: 10, respondsToMemoryPressure: false)
+        let image = try #require(Self.onePixelImage())
+        let source = URL(string: "https://i.discogs.com/huge.jpeg")!
+        decoded.insert(image, byteCount: 11, releaseID: 1, kind: .cover, source: source, maximumPixelSize: 150)
+        #expect(decoded.image(releaseID: 1, kind: .cover, source: source, maximumPixelSize: 150) == nil)
+    }
+
+    private static func onePixelImage() -> PlatformImage? {
+        let context = CGContext(
+            data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        return context?.makeImage().map(ImageCache.platformImage)
     }
 
     @Test("Cached images decode, downsampled to the requested size")
