@@ -58,6 +58,31 @@ struct ReleaseDetailTests {
         #expect(loader.snapshot?.title == "Second", "a loaded page must not stay on its first copy")
     }
 
+    @Test("A stale copy is on screen while its refresh is still out")
+    @MainActor
+    func staleCopyShowsDuringRefresh() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SignOutTests.SlowCollectionProtocol.self]
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
+        try tokenStore.save("test-token")
+        defer { try? tokenStore.delete() }
+        let services = AppServices(
+            modelContainer: try AppServices.makeModelContainer(inMemory: true),
+            tokenStore: tokenStore,
+            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
+            sessionConfiguration: configuration
+        )
+        try await services.store.upsertReleaseDetail(makeRelease(id: 500, title: "Cached"))
+        let sevenHoursLater = Date.now.addingTimeInterval(7 * 3600)
+        let loader = ReleaseDetailLoader(services: services, now: { sevenHoursLater })
+
+        // The stub answers the release request after 0.3 s.
+        let load = Task { await loader.load(releaseID: 500) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(loader.snapshot?.title == "Cached", "the cached copy must not wait for the refresh")
+        await load.value
+    }
+
     @Test("A release detail round-trips through the cache")
     func roundTrip() async throws {
         let store = try makeStore()

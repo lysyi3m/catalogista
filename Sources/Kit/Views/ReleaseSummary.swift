@@ -139,9 +139,15 @@ struct PageSection<Content: View>: View {
 private struct TagRow: View {
     let tags: [String]
 
+    /// Genres and styles can share a name, and each tag is its own id.
+    private var uniqueTags: [String] {
+        var seen = Set<String>()
+        return tags.filter { seen.insert($0).inserted }
+    }
+
     var body: some View {
         FlowLayout(spacing: 6) {
-            ForEach(tags.prefix(5), id: \.self) { tag in
+            ForEach(uniqueTags.prefix(5), id: \.self) { tag in
                 Text(tag)
                     .font(.caption)
                     .padding(.horizontal, 8)

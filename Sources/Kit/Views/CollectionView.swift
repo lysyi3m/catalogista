@@ -174,6 +174,8 @@ struct CollectionView: View {
                             CoverCell(item: item, edge: edge, showsCaption: showsCaption)
                         }
                         .buttonStyle(.plain)
+                        // A dense grid has no caption, and the cover says nothing to VoiceOver.
+                        .accessibilityLabel("\(item.title), \(item.artistName)")
                         // Long press on iOS, right click on macOS.
                         .contextMenu {
                             Button("Open") { onSelect(item) }
