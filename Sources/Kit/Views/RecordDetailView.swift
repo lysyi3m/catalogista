@@ -205,9 +205,11 @@ struct RecordDetailView: View {
         switch loader?.state {
         case .loaded(let snapshot) where !snapshot.tracks.isEmpty:
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(snapshot.tracks) { track in
+                // By position in the list: position and title together are not unique — a release
+                // can repeat an unnumbered heading, and repeated ids make SwiftUI reuse rows.
+                ForEach(Array(snapshot.tracks.enumerated()), id: \.offset) { index, track in
                     TrackRow(track: track)
-                    if track.id != snapshot.tracks.last?.id { Divider() }
+                    if index < snapshot.tracks.count - 1 { Divider() }
                 }
             }
         case .loaded:

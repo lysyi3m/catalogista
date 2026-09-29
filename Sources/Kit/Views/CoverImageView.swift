@@ -26,7 +26,8 @@ struct CoverImageView: View {
     /// `UIScreen.main` assumes one screen and is deprecated.
     @Environment(\.displayScale) private var displayScale
     @State private var image: PlatformImage?
-    @State private var didFail = false
+    /// The request that last failed. The failure mark shows only while that request is current.
+    @State private var failedKey: TaskKey?
 
     var body: some View {
         ZStack {
@@ -40,7 +41,7 @@ struct CoverImageView: View {
                 Rectangle()
                     .fill(.quaternary)
                     .overlay {
-                        Image(systemName: didFail ? "exclamationmark.triangle" : "opticaldisc")
+                        Image(systemName: failedKey == taskKey ? "exclamationmark.triangle" : "opticaldisc")
                             .font(.system(size: max(edge * 0.25, 10)))
                             .foregroundStyle(.tertiary)
                     }
@@ -49,9 +50,12 @@ struct CoverImageView: View {
         // The URL is part of the identity: for a copy with no `cover_image`, the record page starts
         // with the collection's thumb and switches to the release's cover once that arrives, and
         // the load has to follow it.
-        .task(id: TaskKey(releaseID: releaseID, kind: kind, url: remoteURL, edge: bucketedEdge)) {
-            await load()
+        .task(id: taskKey) {
+            await load(taskKey)
         }
+        // Decoration: every cover sits next to text that names the record, or inside a button
+        // labelled with it.
+        .accessibilityHidden(true)
     }
 
     /// Rounding the requested size to a step stops a drag of the density slider from kicking off a
@@ -72,35 +76,52 @@ struct CoverImageView: View {
         )
     }
 
+    /// Everything the decoded image depends on. The scale is part of it: moving the window to a
+    /// screen of another scale needs a decode at the new size.
     private struct TaskKey: Hashable {
         let releaseID: Int
         let kind: ImageCache.Kind
         let url: String?
         let edge: CGFloat
+        let scale: CGFloat
     }
 
-    private func load() async {
+    private var taskKey: TaskKey {
+        TaskKey(releaseID: releaseID, kind: kind, url: remoteURL, edge: bucketedEdge, scale: displayScale)
+    }
+
+    /// Loads the image for `key`, and publishes the outcome only while `key` is still the current
+    /// request. The download behind it is shared and runs on after this task is cancelled, so an
+    /// older, slower load could otherwise land over a newer image. The previous image stays up
+    /// while a new one loads — the record page swaps a thumb for its cover that way.
+    private func load(_ key: TaskKey) async {
         guard let url = remote else {
-            didFail = true
+            image = nil
+            failedKey = key
             return
         }
         if let cached = memoryCached {
             image = cached
-            didFail = false
+            failedKey = nil
             return
         }
         do {
-            image = try await services.imageCache.image(
+            let loaded = try await services.imageCache.image(
                 releaseID: releaseID,
                 kind: kind,
                 remoteURL: url,
-                maximumPixelSize: bucketedEdge * displayScale
+                maximumPixelSize: key.edge * key.scale
             )
-            didFail = false
+            guard !Task.isCancelled, key == taskKey else { return }
+            image = loaded
+            failedKey = nil
         } catch is CancellationError {
             // A scrolled-away cell cancels its own load; nothing to report.
         } catch {
-            didFail = true
+            guard !Task.isCancelled, key == taskKey else { return }
+            // Keeping the previous image would show a cover that is not this one.
+            image = nil
+            failedKey = key
         }
     }
 }

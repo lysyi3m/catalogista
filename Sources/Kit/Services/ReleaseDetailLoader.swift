@@ -56,6 +56,9 @@ final class ReleaseDetailLoader {
                 state = .loaded(cached)
                 return
             }
+            // A stale copy goes up at once and is replaced when the refresh lands. Held back, the
+            // page stays blank for as long as the request takes, rate-limit waits included.
+            if let cached { state = .loaded(cached) }
             guard let client = services.client else {
                 state = cached.map(State.loaded) ?? .failed("No Discogs token.")
                 return

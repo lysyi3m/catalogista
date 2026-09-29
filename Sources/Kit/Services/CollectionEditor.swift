@@ -39,9 +39,9 @@ final class CollectionEditor {
     /// Adds a copy to the folder, optimistically.
     ///
     /// The row appears immediately from search data under a provisional id, then takes the real
-    /// `instance_id` from the response. A release fetch afterwards replaces the search-derived
-    /// artist and title with Discogs' own; that refinement is best-effort, because the add itself
-    /// has already succeeded by then.
+    /// `instance_id` from the response. A release fetch afterwards, in the background, replaces the
+    /// search-derived artist and title with Discogs' own; that refinement is best-effort, because
+    /// the add itself has already succeeded by then.
     @discardableResult
     func add(
         _ result: SearchResult,
@@ -112,7 +112,9 @@ final class CollectionEditor {
             return true
         }
 
-        await refine(releaseID: result.id, instanceID: addition.instanceID, client: client, generation: generation)
+        // The add is done, so the sheet closes now rather than after one more request that may wait
+        // on the rate limit. Held strongly: the sheet that owns this editor goes away on close.
+        Task { await self.refine(releaseID: result.id, instanceID: addition.instanceID, client: client, generation: generation) }
         return true
     }
 

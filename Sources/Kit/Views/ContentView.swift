@@ -475,10 +475,13 @@ public struct ContentView: View {
     private var densityControls: some View {
         HStack(spacing: 8) {
             Image(systemName: "square.grid.3x3.fill").imageScale(.small)
+                .accessibilityHidden(true)
             Slider(value: $itemWidth, in: 60...260)
                 .frame(width: 140)
                 .controlSize(.small)
+                .accessibilityLabel("Cover size")
             Image(systemName: "square.fill").imageScale(.small)
+                .accessibilityHidden(true)
         }
         .foregroundStyle(.secondary)
     }

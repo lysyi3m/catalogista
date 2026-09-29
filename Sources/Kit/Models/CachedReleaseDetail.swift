@@ -5,13 +5,11 @@ import SwiftData
 /// One track, stored inline on the release. Codable so SwiftData can persist the array as an
 /// attribute rather than a relationship — tracks have no identity of their own and are only ever
 /// read as a whole list.
-struct CachedTrack: Codable, Sendable, Hashable, Identifiable {
+struct CachedTrack: Codable, Sendable, Hashable {
     var position: String
     var title: String
     var duration: String
     var isTrack: Bool
-
-    var id: String { "\(position)-\(title)" }
 
     init(from track: Track) {
         position = track.position
