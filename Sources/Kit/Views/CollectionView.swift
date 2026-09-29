@@ -22,6 +22,10 @@ struct CollectionView: View {
     private let onRequestRemove: (CachedCollectionItem) -> Void
 
     @State private var hoveredID: PersistentIdentifier?
+    /// Room under a short list, and the grid's visible height. Both keep the credit on the bottom
+    /// edge while the content is short. See `creditSlack(_:)` and `creditViewport(_:)`.
+    @State private var creditSlack: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
 
     init(
         folderID: Int,
@@ -50,21 +54,20 @@ struct CollectionView: View {
     }
 
     var body: some View {
-        if items.isEmpty {
-            // The title still names a Discogs folder, so the credit stays.
-            VStack(spacing: 0) {
-                if searchQuery.isEmpty {
-                    // Only a folder can be empty here: an empty collection never reaches this view.
-                    ContentUnavailableView(
-                        "No Records",
-                        systemImage: "folder",
-                        description: Text("Folder “\(folderName)” is empty.")
-                    )
-                } else {
-                    ContentUnavailableView.search(text: searchQuery)
-                }
-                credit
-            }
+        if items.isEmpty, !searchQuery.isEmpty {
+            // Shows only the query, no Discogs data, so there is nothing to credit.
+            ContentUnavailableView.search(text: searchQuery)
+        } else if items.isEmpty {
+            // Only a folder can be empty here: an empty collection never reaches this view.
+            ContentUnavailableView(
+                "No Records",
+                systemImage: "folder",
+                description: Text("Folder “\(folderName)” is empty.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The title still names a Discogs folder, so the credit stays, on the bottom edge as
+            // elsewhere. An overlay, so the message centres in the window like the no-match one.
+            .overlay(alignment: .bottom) { credit() }
         } else if layout == .list {
             list
         } else {
@@ -136,10 +139,11 @@ struct CollectionView: View {
                             .rowHoverHighlight(id: item.id, hovered: $hoveredID)
                     }
                 }
-                credit.creditRow()
+                credit(slack: creditSlack).creditRow()
             }
             // The list's own trailing margin would add to the space the credit brings.
             .contentMargins(.bottom, 0, for: .scrollContent)
+            .creditSlack($creditSlack)
             .detailScrollEdge()
             #if os(macOS)
             .listStyle(.inset)
@@ -162,31 +166,41 @@ struct CollectionView: View {
         showsCaption: Bool
     ) -> some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: spacing) {
-                ForEach(items) { item in
-                    Button { onSelect(item) } label: {
-                        CoverCell(item: item, edge: edge, showsCaption: showsCaption)
-                    }
-                    .buttonStyle(.plain)
-                    // Long press on iOS, right click on macOS.
-                    .contextMenu {
-                        Button("Open") { onSelect(item) }
-                        Divider()
-                        Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
-                            onRequestRemove(item)
+            // At least the visible height, so a short folder still ends on the bottom edge.
+            VStack(spacing: 0) {
+                LazyVGrid(columns: columns, spacing: spacing) {
+                    ForEach(items) { item in
+                        Button { onSelect(item) } label: {
+                            CoverCell(item: item, edge: edge, showsCaption: showsCaption)
+                        }
+                        .buttonStyle(.plain)
+                        // Long press on iOS, right click on macOS.
+                        .contextMenu {
+                            Button("Open") { onSelect(item) }
+                            Divider()
+                            Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
+                                onRequestRemove(item)
+                            }
                         }
                     }
                 }
+                // No bottom padding: the credit below brings its own space.
+                .padding([.horizontal, .top], spacing)
+                Spacer(minLength: 0)
+                credit()
             }
-            // No bottom padding: the credit below brings its own space.
-            .padding([.horizontal, .top], spacing)
-            credit
+            .frame(minHeight: viewportHeight)
         }
+        .creditViewport($viewportHeight)
         .detailScrollEdge()
     }
 
-    private var credit: some View {
-        DiscogsCredit(destination: DiscogsNotice.collectionURL(username: services.accountUsername, folderID: folderID))
+    /// The empty states fill the window themselves, so only the scrolling layouts pass slack.
+    private func credit(slack: CGFloat = 0) -> some View {
+        DiscogsCredit(
+            destination: DiscogsNotice.collectionURL(username: services.accountUsername, folderID: folderID),
+            slack: slack
+        )
     }
 
     #if os(iOS)

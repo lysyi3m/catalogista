@@ -15,6 +15,9 @@ struct RecordDetailView: View {
     @State private var editor: CollectionEditor?
     @State private var isConfirmingRemoval = false
     @State private var isTracklistExpanded = false
+    /// The visible height. A short page is stretched to it, which keeps the credit on the bottom
+    /// edge. See `creditViewport(_:)`.
+    @State private var viewportHeight: CGFloat = 0
 
     private var detail: ReleaseDetailSnapshot? { loader?.snapshot }
 
@@ -43,13 +46,16 @@ struct RecordDetailView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
+                Spacer(minLength: 0)
                 // Outside the spaced stack: the credit brings its own space.
                 DiscogsCredit(destination: discogsURL)
             }
             .frame(maxWidth: 780, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding([.horizontal, .top], pagePadding)
+            .frame(minHeight: viewportHeight)
         }
+        .creditViewport($viewportHeight)
         .detailScrollEdge()
         .navigationTitle(item.title)
         #if os(iOS)

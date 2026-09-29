@@ -40,10 +40,22 @@ enum DiscogsNotice {
 /// leaving the app, and VoiceOver reads it in full. The credit owns the space around it, the same
 /// above as below, so every screen ends the same way: content, space, credit, space. Callers place
 /// it flush against their content.
+///
+/// On a scrolling screen, `slack` is the room left under content that does not fill the window
+/// (see `creditSlack(_:)`). It goes above the credit, so the credit sits on the bottom edge
+/// whatever the screen holds, and follows the content once it scrolls.
 struct DiscogsCredit: View {
     let destination: URL
+    var slack: CGFloat = 0
 
     var body: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: slack)
+            line
+        }
+    }
+
+    private var line: some View {
         HStack(spacing: 4) {
             Text("Data provided by Discogs.")
                 .foregroundStyle(.secondary)
@@ -63,6 +75,42 @@ struct DiscogsCredit: View {
 }
 
 extension View {
+    /// Measures the room a list leaves under its content, for `DiscogsCredit.slack`.
+    ///
+    /// The content includes the slack itself, so the new value is the old one plus what is still
+    /// left over. It settles after one pass, and sub-point changes are ignored so rounding cannot
+    /// feed back into another layout.
+    func creditSlack(_ slack: Binding<CGFloat>) -> some View {
+        onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom
+                - geometry.contentSize.height
+        } action: { _, leftover in
+            let settled = max(0, slack.wrappedValue + leftover)
+            if abs(settled - slack.wrappedValue) >= 1 { slack.wrappedValue = settled }
+        }
+    }
+
+    /// Measures a scroll view's visible height, inside its insets.
+    ///
+    /// Content given at least this height, with a flexible space before the credit, keeps the
+    /// credit on the bottom edge until the content is tall enough to scroll. For scroll views whose
+    /// content can be stretched; a `List` cannot, and uses `creditSlack(_:)`.
+    func creditViewport(_ height: Binding<CGFloat>) -> some View {
+        onScrollGeometryChange(for: CGFloat.self) { geometry in
+            #if os(macOS)
+            // The detail column already ends at the toolbar and the status bar, yet the scroll view
+            // still reports both as insets. Subtracting them counts the bars twice, and the credit
+            // stops about 90pt short of the bottom edge.
+            geometry.containerSize.height
+            #else
+            // On iPhone the content runs under the bars, so the insets are real.
+            geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom
+            #endif
+        } action: { _, visible in
+            height.wrappedValue = max(0, visible)
+        }
+    }
+
     /// Places a credit as the last row of a list. A section footer adds insets of its own, which
     /// would leave more space below the credit than above it.
     func creditRow() -> some View {

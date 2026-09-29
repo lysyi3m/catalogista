@@ -20,6 +20,10 @@ struct AddRecordView: View {
     @State private var targetFolderID = DiscogsFolder.uncategorized
     @State private var editor: CollectionEditor?
     @State private var hoveredResultID: Int?
+    /// Room under short results, and the second step's visible height. Both keep the credit on
+    /// the bottom edge. See `creditSlack(_:)` and `creditViewport(_:)`.
+    @State private var resultsCreditSlack: CGFloat = 0
+    @State private var confirmationViewportHeight: CGFloat = 0
     @State private var search: ReleaseSearchController?
     /// Shown when there is no client to search with, which is not a search failure.
     @State private var noTokenMessage: String?
@@ -202,11 +206,14 @@ struct AddRecordView: View {
                         .fixedSize()
                     }
                 }
+                Spacer(minLength: 0)
                 // The search results' credit is gone once this step replaces them.
                 DiscogsCredit(destination: DiscogsNotice.releaseURL(id: result.id))
             }
             .padding([.horizontal, .top], confirmationPadding)
+            .frame(minHeight: confirmationViewportHeight)
         }
+        .creditViewport($confirmationViewportHeight)
         .disabled(editor?.isWorking ?? false)
     }
 
@@ -324,12 +331,13 @@ struct AddRecordView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, 24)
                     }
-                    DiscogsCredit(destination: DiscogsNotice.searchURL(query: query))
+                    DiscogsCredit(destination: DiscogsNotice.searchURL(query: query), slack: resultsCreditSlack)
                 }
                 .creditRow()
             }
             // The list's own trailing margin would add to the space the credit brings.
             .contentMargins(.bottom, 0, for: .scrollContent)
+            .creditSlack($resultsCreditSlack)
             #if os(iOS)
             // The default grouped style insets the results into a card, which under the sheet's
             // own divider reads as a band of dead space. Search results belong flush to the edge.
