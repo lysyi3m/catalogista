@@ -15,7 +15,9 @@ enum DiscogsNotice {
               var components = URLComponents(string: "https://www.discogs.com/user/\(encoded)/collection")
         else { return URL(string: "https://www.discogs.com")! }
         if folderID != DiscogsFolder.all {
-            components.queryItems = [URLQueryItem(name: "folder_id", value: String(folderID))]
+            // `folder`, as discogs.com itself links a folder. The API's `folder_id` is ignored there
+            // and opens the whole collection.
+            components.queryItems = [URLQueryItem(name: "folder", value: String(folderID))]
         }
         return components.url ?? URL(string: "https://www.discogs.com")!
     }

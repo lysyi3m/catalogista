@@ -108,7 +108,7 @@ struct FolderTests {
     func creditURL() {
         #expect(
             DiscogsNotice.collectionURL(username: "digger", folderID: 5).absoluteString
-                == "https://www.discogs.com/user/digger/collection?folder_id=5"
+                == "https://www.discogs.com/user/digger/collection?folder=5"
         )
         #expect(
             DiscogsNotice.collectionURL(username: "digger").absoluteString

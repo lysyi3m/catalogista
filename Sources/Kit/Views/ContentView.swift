@@ -152,8 +152,6 @@ public struct ContentView: View {
     }
 
     private var sidebar: some View {
-        // Links rather than tagged labels: on iPhone a tagged row only selects, and a link is what
-        // pushes the records from the folder list.
         List(selection: $sidebarSelection) {
             SidebarRow(value: DiscogsFolder.all, title: "Collection", systemImage: "square.stack", count: allItems.count)
             if !folders.isEmpty {
@@ -541,6 +539,10 @@ extension View {
 /// On macOS the count is a badge, trailing the row the way Mail's are. On iOS a badge lands after
 /// the navigation chevron, so the count goes inside the row, before it, as in Settings. A zero is
 /// left out on both.
+///
+/// A tagged label on macOS and a link on iOS. On iPhone a tagged row only selects, and a link is
+/// what pushes the records from the folder list. On macOS a link row reports no selection for the
+/// Collection row, so picking Collection after a folder left the folder on screen.
 private struct SidebarRow: View {
     let value: Int
     let title: String
@@ -549,10 +551,9 @@ private struct SidebarRow: View {
 
     var body: some View {
         #if os(macOS)
-        NavigationLink(value: value) {
-            Label(title, systemImage: systemImage)
-        }
-        .badge(count)
+        Label(title, systemImage: systemImage)
+            .badge(count)
+            .tag(value)
         #else
         NavigationLink(value: value) {
             HStack {
