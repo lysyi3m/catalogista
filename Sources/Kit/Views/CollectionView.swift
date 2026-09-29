@@ -50,15 +50,21 @@ struct CollectionView: View {
     }
 
     var body: some View {
-        if items.isEmpty, !searchQuery.isEmpty {
-            ContentUnavailableView.search(text: searchQuery)
-        } else if items.isEmpty {
-            // Only a folder can be empty here: an empty collection never reaches this view.
-            ContentUnavailableView(
-                "No Records",
-                systemImage: "folder",
-                description: Text("\(folderName) is empty.")
-            )
+        if items.isEmpty {
+            // The title still names a Discogs folder, so the credit stays.
+            VStack(spacing: 0) {
+                if searchQuery.isEmpty {
+                    // Only a folder can be empty here: an empty collection never reaches this view.
+                    ContentUnavailableView(
+                        "No Records",
+                        systemImage: "folder",
+                        description: Text("Folder “\(folderName)” is empty.")
+                    )
+                } else {
+                    ContentUnavailableView.search(text: searchQuery)
+                }
+                credit
+            }
         } else if layout == .list {
             list
         } else {

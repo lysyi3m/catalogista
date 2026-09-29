@@ -12,9 +12,11 @@ public struct ContentView: View {
     /// The folder last opened, restored at launch. `DiscogsFolder.all` is Collection.
     @AppStorage("selectedFolder") private var storedFolderID = DiscogsFolder.all
     @AppStorage("isSidebarVisible") private var isSidebarVisible = false
-    /// On iPhone the split view is a stack. Opening on the detail column lands on the collection,
-    /// with the sidebar one step back, instead of on the folder list.
-    @State private var compactColumn = NavigationSplitViewColumn.detail
+    /// The sidebar's selected row, kept apart from the folder on screen. On iPhone the split view
+    /// is a stack, and a selected row is what shows the records: set at launch, it opens on them
+    /// with the folder list one step back. Back clears it; bound to the folder itself, which is
+    /// never empty, Back would push the records again at once.
+    @State private var sidebarSelection: Int?
 
     @AppStorage("collectionSort") private var sortRaw = CollectionSortOption.default.rawValue
     @AppStorage("collectionSortDirection") private var directionRaw = CollectionSortOption.defaultOrder.rawValue
@@ -86,6 +88,15 @@ public struct ContentView: View {
             }
             // A record page belongs to the folder it was opened from.
             .onChange(of: folderID) { selection = nil }
+            .onChange(of: sidebarSelection) {
+                if let sidebarSelection { storedFolderID = sidebarSelection }
+            }
+            .onAppear { sidebarSelection = folderID }
+            // Follows the folder on screen, as when a remembered folder is gone and Collection
+            // stands in. Left empty while empty, so Back on iPhone stays on the folder list.
+            .onChange(of: folderID) {
+                if sidebarSelection != nil { sidebarSelection = folderID }
+            }
             .task {
                 if editor == nil { editor = services.makeEditor() }
                 // On-launch delta, skipped when a sync ran moments ago.
@@ -118,10 +129,7 @@ public struct ContentView: View {
     @ViewBuilder
     private var root: some View {
         if services.hasToken {
-            NavigationSplitView(
-                columnVisibility: sidebarVisibility,
-                preferredCompactColumn: $compactColumn
-            ) {
+            NavigationSplitView(columnVisibility: sidebarVisibility) {
                 sidebar
             } detail: {
                 detail
@@ -140,19 +148,20 @@ public struct ContentView: View {
     }
 
     private var sidebar: some View {
-        List(selection: Binding<Int?>(
-            get: { folderID },
-            set: { storedFolderID = $0 ?? DiscogsFolder.all }
-        )) {
-            Label("Collection", systemImage: "square.stack")
-                .badge(allItems.count)
-                .tag(DiscogsFolder.all)
+        // Links rather than tagged labels: on iPhone a tagged row is not tappable, and a link is
+        // what pushes the records from the folder list.
+        List(selection: $sidebarSelection) {
+            NavigationLink(value: DiscogsFolder.all) {
+                Label("Collection", systemImage: "square.stack")
+            }
+            .badge(allItems.count)
             if !folders.isEmpty {
                 Section("Folders") {
                     ForEach(folders) { folder in
-                        Label(folder.name, systemImage: "folder")
-                            .badge(folderCounts[folder.id] ?? 0)
-                            .tag(folder.id)
+                        NavigationLink(value: folder.id) {
+                            Label(folder.name, systemImage: "folder")
+                        }
+                        .badge(folderCounts[folder.id] ?? 0)
                     }
                 }
             }
