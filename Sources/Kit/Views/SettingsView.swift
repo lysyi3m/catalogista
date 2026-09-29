@@ -165,7 +165,7 @@ struct CollectionSettingsView: View {
         message = nil
         do {
             try await syncController.resetAndResync()
-            message = syncController.errorMessage ?? "Cache rebuilt"
+            message = "Cache rebuilt"
         } catch {
             message = error.localizedDescription
         }

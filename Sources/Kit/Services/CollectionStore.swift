@@ -48,32 +48,40 @@ actor CollectionStore {
     }
 
     /// Inserts new copies and refreshes existing ones in place.
+    ///
+    /// During a sync, a copy removed on this device since the sync began is skipped: the page
+    /// that still lists it was fetched before the removal.
     func upsert(_ items: [CollectionItem]) throws {
         let existing = try existingItemsByInstanceID()
-        for item in items {
+        let removed = writesDuringSync?.removed ?? []
+        for item in items where !removed.contains(item.instanceID) {
             if let cached = existing[item.instanceID] {
                 cached.update(from: item)
             } else {
                 modelContext.insert(CachedCollectionItem(from: item))
             }
         }
-        try modelContext.save()
+        try saveOrRollback()
     }
 
-    /// Drops every cached copy whose `instanceID` is absent from `instanceIDs`.
+    /// Drops every cached copy whose `instanceID` is absent from `instanceIDs`, except those added
+    /// on this device since the sync began: the pages were fetched before them.
     @discardableResult
     func pruneItems(keeping instanceIDs: Set<Int>) throws -> Int {
+        let kept = instanceIDs.union(writesDuringSync?.added ?? [])
         let stale = try modelContext.fetch(FetchDescriptor<CachedCollectionItem>())
-            .filter { !instanceIDs.contains($0.instanceID) }
+            .filter { !kept.contains($0.instanceID) }
         for item in stale { modelContext.delete(item) }
-        try modelContext.save()
+        try saveOrRollback()
         return stale.count
     }
 
     func deleteItem(instanceID: Int) throws {
         guard let item = try cachedItem(instanceID: instanceID) else { return }
         modelContext.delete(item)
-        try modelContext.save()
+        try saveOrRollback()
+        writesDuringSync?.added.remove(instanceID)
+        writesDuringSync?.removed.insert(instanceID)
     }
 
     // MARK: - Optimistic writes
@@ -81,28 +89,31 @@ actor CollectionStore {
     /// Inserts a copy the user just added, before Discogs has confirmed it.
     func insert(_ pending: PendingAddition) throws {
         modelContext.insert(CachedCollectionItem(from: pending))
-        try modelContext.save()
+        try saveOrRollback()
+        writesDuringSync?.added.insert(pending.instanceID)
     }
 
     /// Puts a removed copy back, after Discogs rejected the delete.
     func restore(_ snapshot: CollectionItemSnapshot) throws {
         guard try cachedItem(instanceID: snapshot.instanceID) == nil else { return }
         modelContext.insert(CachedCollectionItem(from: snapshot))
-        try modelContext.save()
+        try saveOrRollback()
+        writesDuringSync?.removed.remove(snapshot.instanceID)
     }
 
     /// Swaps a provisional id for the one Discogs assigned.
     func reassignInstanceID(from provisional: Int, to confirmed: Int) throws {
         guard let item = try cachedItem(instanceID: provisional) else { return }
         item.instanceID = confirmed
-        try modelContext.save()
+        try saveOrRollback()
+        writesDuringSync?.added.insert(confirmed)
     }
 
     /// Replaces the search-derived fields with the release's own, once it has been fetched.
     func apply(_ release: Release, toInstanceID instanceID: Int) throws {
         guard let item = try cachedItem(instanceID: instanceID) else { return }
         item.apply(release)
-        try modelContext.save()
+        try saveOrRollback()
     }
 
     // MARK: - Release detail
@@ -121,7 +132,7 @@ actor CollectionStore {
             cached = CachedReleaseDetail(from: release)
             modelContext.insert(cached)
         }
-        try modelContext.save()
+        try saveOrRollback()
         return cached.snapshot
     }
 
@@ -176,7 +187,25 @@ actor CollectionStore {
                 modelContext.delete(stale)
             }
         }
-        try modelContext.save()
+        try saveOrRollback()
+    }
+
+    // MARK: - Writes during a sync
+
+    /// Copies added or removed on this device while a sync runs; nil outside one.
+    ///
+    /// A sync reads Discogs over many requests, so its pages can predate a write made meanwhile:
+    /// pruning would delete a copy just added, and a later page would put back a copy just
+    /// removed. Kept on this actor, so a write and the sync's use of it cannot interleave. Recorded
+    /// only once the write is saved.
+    private var writesDuringSync: (added: Set<Int>, removed: Set<Int>)?
+
+    func beginSync() {
+        writesDuringSync = ([], [])
+    }
+
+    func endSync() {
+        writesDuringSync = nil
     }
 
     // MARK: - Maintenance
@@ -185,7 +214,19 @@ actor CollectionStore {
         try modelContext.delete(model: CachedCollectionItem.self)
         try modelContext.delete(model: CachedReleaseDetail.self)
         try modelContext.delete(model: CachedFolder.self)
-        try modelContext.save()
+        try saveOrRollback()
+    }
+
+    /// Saves, or discards every unsaved change if the save fails. The context lives as long as the
+    /// app, so a change left pending would be saved by the next unrelated write — an optimistic
+    /// insert whose request never went out, for one.
+    private func saveOrRollback() throws {
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 
     private func existingItemsByInstanceID() throws -> [Int: CachedCollectionItem] {

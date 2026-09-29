@@ -43,6 +43,56 @@ struct CollectionStoreTests {
         return try DiscogsClient.makeDecoder().decode(CollectionItem.self, from: Data(json.utf8))
     }
 
+    private func makePending(instanceID: Int) throws -> PendingAddition {
+        let json = """
+        {"id": 600, "title": "Talking Heads - Fear of Music", "year": "1979", "format": ["Vinyl"]}
+        """
+        let result = try DiscogsClient.makeDecoder().decode(SearchResult.self, from: Data(json.utf8))
+        return PendingAddition(from: result, instanceID: instanceID, folderID: 1)
+    }
+
+    @Test("A copy added while a sync runs survives that sync's prune")
+    func addDuringSyncIsNotPruned() async throws {
+        let store = try makeStore()
+        try await store.upsert([try makeItem(instanceID: 1)])
+
+        await store.beginSync()
+        // Added after the sync fetched its pages, which therefore do not list it.
+        try await store.insert(try makePending(instanceID: -5))
+        try await store.reassignInstanceID(from: -5, to: 9)
+        let removed = try await store.pruneItems(keeping: [1])
+        await store.endSync()
+
+        #expect(removed == 0)
+        #expect(try await store.item(instanceID: 9) != nil, "the add must not vanish")
+    }
+
+    @Test("A copy removed while a sync runs is not put back by an earlier page")
+    func removeDuringSyncIsNotReinserted() async throws {
+        let store = try makeStore()
+        try await store.upsert([try makeItem(instanceID: 1), try makeItem(instanceID: 2)])
+
+        await store.beginSync()
+        try await store.deleteItem(instanceID: 2)
+        // A page fetched before the removal still lists the copy.
+        try await store.upsert([try makeItem(instanceID: 1), try makeItem(instanceID: 2)])
+        await store.endSync()
+
+        #expect(try await store.item(instanceID: 2) == nil, "the removal must stick")
+    }
+
+    @Test("Outside a sync, writes leave no trace in later reconciliation")
+    func writesOutsideSyncAreNotRecorded() async throws {
+        let store = try makeStore()
+        try await store.insert(try makePending(instanceID: -6))
+        #expect(try await store.pruneItems(keeping: []) == 1)
+
+        try await store.upsert([try makeItem(instanceID: 3)])
+        try await store.deleteItem(instanceID: 3)
+        try await store.upsert([try makeItem(instanceID: 3)])
+        #expect(try await store.item(instanceID: 3) != nil)
+    }
+
     @Test("Records with no year sort last in both directions")
     func yearlessRecordsSortLast() async throws {
         let store = try makeStore()
