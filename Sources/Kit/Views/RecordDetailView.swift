@@ -50,6 +50,7 @@ struct RecordDetailView: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .padding([.horizontal, .top], pagePadding)
         }
+        .detailScrollEdge()
         .navigationTitle(item.title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

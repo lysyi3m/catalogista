@@ -134,6 +134,7 @@ struct CollectionView: View {
             }
             // The list's own trailing margin would add to the space the credit brings.
             .contentMargins(.bottom, 0, for: .scrollContent)
+            .detailScrollEdge()
             #if os(macOS)
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
@@ -175,6 +176,7 @@ struct CollectionView: View {
             .padding([.horizontal, .top], spacing)
             credit
         }
+        .detailScrollEdge()
     }
 
     private var credit: some View {

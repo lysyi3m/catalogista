@@ -480,22 +480,35 @@ public struct ContentView: View {
     #endif
 }
 
-/// The toolbar background and the macOS status bar, applied to each page of the detail stack.
+/// The macOS status bar, applied to each page of the detail stack.
 ///
 /// A page pushed inside a split view's detail column does not inherit modifiers applied outside
-/// its `NavigationStack`, so the record page needs them as much as the collection does.
+/// its `NavigationStack`, so the record page needs it as much as the collection does.
 #if os(macOS)
 private struct WindowChrome<StatusBar: View>: ViewModifier {
     let statusBar: StatusBar
 
     func body(content: Content) -> some View {
         content
-            .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
-            .toolbarBackground(.visible, for: .windowToolbar)
             .safeAreaInset(edge: .bottom) { statusBar }
     }
 }
 #endif
+
+extension View {
+    /// Keeps covers from showing through the macOS toolbar as they scroll under it.
+    ///
+    /// A hard scroll edge rather than an opaque toolbar background: the background spans the
+    /// window and cuts the top off the sidebar. Applied to each scroll view, because the style does
+    /// not reach a scroll view from a container around it.
+    func detailScrollEdge() -> some View {
+        #if os(macOS)
+        scrollEdgeEffectStyle(.hard, for: .top)
+        #else
+        self
+        #endif
+    }
+}
 
 /// The search field, present only once there is a collection to search. It searches the folder on
 /// screen, and the query stays as the user moves between folders.
