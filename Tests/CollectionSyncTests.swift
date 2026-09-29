@@ -11,13 +11,24 @@ struct CollectionSyncTests {
         nonisolated(unsafe) static var releaseInstanceIDs: [Int] = []
         nonisolated(unsafe) static var reportedItems = 0
         nonisolated(unsafe) static var reportedPages = 1
+        /// The folders Discogs reports, and the one every copy is filed in.
+        nonisolated(unsafe) static var folders: [(id: Int, name: String)] = [(1, "Uncategorized")]
+        nonisolated(unsafe) static var copiesFolderID = 1
         private static let lock = NSLock()
 
-        static func serve(instanceIDs: [Int], claimingItems: Int, pages: Int = 1) {
+        static func serve(
+            instanceIDs: [Int],
+            claimingItems: Int,
+            pages: Int = 1,
+            folders: [(id: Int, name: String)] = [(1, "Uncategorized")],
+            copiesIn folderID: Int = 1
+        ) {
             lock.withLock {
                 releaseInstanceIDs = instanceIDs
                 reportedItems = claimingItems
                 reportedPages = pages
+                self.folders = folders
+                copiesFolderID = folderID
             }
         }
 
@@ -30,14 +41,16 @@ struct CollectionSyncTests {
             if path.hasSuffix("/oauth/identity") {
                 body = #"{"id":1,"username":"tester","resource_url":"https://api.discogs.com"}"#
             } else if path.hasSuffix("/collection/folders") {
-                body = #"{"folders":[{"id":1,"name":"Uncategorized","count":0}]}"#
+                let folders = Self.lock.withLock { Self.folders }
+                    .map { #"{"id":\#($0.id),"name":"\#($0.name)","count":0}"# }
+                body = #"{"folders":[\#(folders.joined(separator: ","))]}"#
             } else {
-                let (ids, items, pages) = Self.lock.withLock {
-                    (Self.releaseInstanceIDs, Self.reportedItems, Self.reportedPages)
+                let (ids, items, pages, folderID) = Self.lock.withLock {
+                    (Self.releaseInstanceIDs, Self.reportedItems, Self.reportedPages, Self.copiesFolderID)
                 }
                 let releases = ids.map { id in
                     """
-                    {"id":500,"instance_id":\(id),"folder_id":1,"rating":0,
+                    {"id":500,"instance_id":\(id),"folder_id":\(folderID),"rating":0,
                      "basic_information":{"id":500,"title":"Remain In Light","year":1980,
                      "cover_image":"https://i.discogs.com/\(id)-cover.jpeg",
                      "artists":[{"name":"Talking Heads","join":""}],
@@ -144,6 +157,44 @@ struct CollectionSyncTests {
         task.cancel()
         await #expect(throws: (any Error).self) { _ = try await task.value }
         #expect(try await store.itemCount() == 3, "a cancelled sync must not prune")
+    }
+
+    @Test("A folder removed on discogs.com stays cached while the collection fetch is incomplete")
+    func incompleteFetchKeepsRemovedFolder() async throws {
+        let store = try makeStore()
+        let syncer = makeSyncer(store: store)
+
+        StubProtocol.serve(
+            instanceIDs: [1, 2],
+            claimingItems: 2,
+            folders: [(1, "Uncategorized"), (7, "Jazz")],
+            copiesIn: 7
+        )
+        _ = try await syncer.reconcile()
+
+        // Jazz is gone from the folder list and a new folder appears, but the page is short. The
+        // copies still say Jazz, so dropping it now would leave them in no folder the sidebar
+        // lists; the new folder is added at once, since copies may already be filed in it.
+        StubProtocol.serve(
+            instanceIDs: [],
+            claimingItems: 2,
+            folders: [(1, "Uncategorized"), (8, "Soul")],
+            copiesIn: 7
+        )
+        await #expect(throws: CollectionSyncer.SyncError.self) {
+            _ = try await syncer.reconcile()
+        }
+        #expect(try await store.folders().map(\.id).sorted() == [1, 7, 8])
+
+        // A complete fetch settles it.
+        StubProtocol.serve(
+            instanceIDs: [1, 2],
+            claimingItems: 2,
+            folders: [(1, "Uncategorized"), (8, "Soul")],
+            copiesIn: 8
+        )
+        _ = try await syncer.reconcile()
+        #expect(try await store.folders().map(\.id).sorted() == [1, 8])
     }
 
     @Test("An emptied collection is still an emptied collection")

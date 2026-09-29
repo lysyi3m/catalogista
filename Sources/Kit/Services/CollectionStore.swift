@@ -141,7 +141,24 @@ actor CollectionStore {
         return try modelContext.fetch(descriptor).map(\.snapshot)
     }
 
+    /// Inserts new folders and refreshes existing ones, dropping none.
+    ///
+    /// A sync applies this before it fetches the collection, so a copy that arrives in a new
+    /// folder has that folder to appear in. Dropping waits for `replaceFolders(_:)`.
+    func upsertFolders(_ folders: [Folder]) throws {
+        try applyFolders(folders, droppingOthers: false)
+    }
+
+    /// Makes the cached folders exactly `folders`.
+    ///
+    /// Only after a complete collection fetch: a folder dropped earlier would strand the cached
+    /// copies still filed in it if the fetch then failed, since they would belong to no folder the
+    /// sidebar lists.
     func replaceFolders(_ folders: [Folder]) throws {
+        try applyFolders(folders, droppingOthers: true)
+    }
+
+    private func applyFolders(_ folders: [Folder], droppingOthers: Bool) throws {
         var existing = try Dictionary(
             modelContext.fetch(FetchDescriptor<CachedFolder>()).map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -153,7 +170,9 @@ actor CollectionStore {
                 modelContext.insert(CachedFolder(from: folder))
             }
         }
-        for stale in existing.values { modelContext.delete(stale) }
+        if droppingOthers {
+            for stale in existing.values { modelContext.delete(stale) }
+        }
         try modelContext.save()
     }
 

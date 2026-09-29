@@ -62,7 +62,7 @@ actor CollectionSyncer {
         let identity = try await client.identity()
 
         let folders = try await client.folders(user: identity.username)
-        try await store.replaceFolders(folders)
+        try await store.upsertFolders(folders)
 
         var seenInstanceIDs = Set<Int>()
         var itemsSynced = 0
@@ -112,6 +112,8 @@ actor CollectionSyncer {
             throw SyncError.incompleteCollection(seen: itemsSynced, expected: reportedItems ?? 0)
         }
         let itemsRemoved = try await store.pruneItems(keeping: seenInstanceIDs)
+        // Removed folders go only after a complete fetch. See `replaceFolders(_:)`.
+        try await store.replaceFolders(folders)
 
         return Summary(
             username: identity.username,
