@@ -61,10 +61,10 @@ actor CollectionSyncer {
     func reconcile(onProgress: (@Sendable (Progress) -> Void)? = nil) async throws -> Summary {
         let identity = try await client.identity()
 
-        let folders = try await client.folders(user: identity.username)
-        try await store.upsertFolders(folders)
+        try await store.upsertFolders(try await client.folders(user: identity.username))
 
         var seenInstanceIDs = Set<Int>()
+        var seenFolderIDs = Set<Int>()
         var itemsSynced = 0
         var pagesSeen = 0
         var reportedItems: Int?
@@ -77,6 +77,7 @@ actor CollectionSyncer {
 
             for item in page.releases {
                 seenInstanceIDs.insert(item.instanceID)
+                seenFolderIDs.insert(item.folderID)
                 // The grid draws cover art, so that is what is worth having on disk before the
                 // user scrolls. The thumb is only a fallback for releases with no cover.
                 let source = item.basicInformation.coverImage ?? item.basicInformation.thumb
@@ -112,8 +113,11 @@ actor CollectionSyncer {
             throw SyncError.incompleteCollection(seen: itemsSynced, expected: reportedItems ?? 0)
         }
         let itemsRemoved = try await store.pruneItems(keeping: seenInstanceIDs)
-        // Removed folders go only after a complete fetch. See `replaceFolders(_:)`.
-        try await store.replaceFolders(folders)
+        // Fetched again, so the list is at least as new as the copies: a folder created while the
+        // pages came in is not missing from it. Removed folders go only now, and never one a copy
+        // still names. See `replaceFolders(_:keeping:)`.
+        let folders = try await client.folders(user: identity.username)
+        try await store.replaceFolders(folders, keeping: seenFolderIDs)
 
         return Summary(
             username: identity.username,

@@ -14,6 +14,10 @@ struct CollectionSyncTests {
         /// The folders Discogs reports, and the one every copy is filed in.
         nonisolated(unsafe) static var folders: [(id: Int, name: String)] = [(1, "Uncategorized")]
         nonisolated(unsafe) static var copiesFolderID = 1
+        /// What the folder list says once the pages are in, when it changed on discogs.com
+        /// between the two requests.
+        nonisolated(unsafe) static var foldersAfterPages: [(id: Int, name: String)]?
+        nonisolated(unsafe) static var pagesServed = false
         private static let lock = NSLock()
 
         static func serve(
@@ -21,7 +25,8 @@ struct CollectionSyncTests {
             claimingItems: Int,
             pages: Int = 1,
             folders: [(id: Int, name: String)] = [(1, "Uncategorized")],
-            copiesIn folderID: Int = 1
+            copiesIn folderID: Int = 1,
+            foldersAfterPages: [(id: Int, name: String)]? = nil
         ) {
             lock.withLock {
                 releaseInstanceIDs = instanceIDs
@@ -29,6 +34,8 @@ struct CollectionSyncTests {
                 reportedPages = pages
                 self.folders = folders
                 copiesFolderID = folderID
+                self.foldersAfterPages = foldersAfterPages
+                pagesServed = false
             }
         }
 
@@ -41,12 +48,15 @@ struct CollectionSyncTests {
             if path.hasSuffix("/oauth/identity") {
                 body = #"{"id":1,"username":"tester","resource_url":"https://api.discogs.com"}"#
             } else if path.hasSuffix("/collection/folders") {
-                let folders = Self.lock.withLock { Self.folders }
+                let folders = Self.lock.withLock {
+                    Self.pagesServed ? Self.foldersAfterPages ?? Self.folders : Self.folders
+                }
                     .map { #"{"id":\#($0.id),"name":"\#($0.name)","count":0}"# }
                 body = #"{"folders":[\#(folders.joined(separator: ","))]}"#
             } else {
                 let (ids, items, pages, folderID) = Self.lock.withLock {
-                    (Self.releaseInstanceIDs, Self.reportedItems, Self.reportedPages, Self.copiesFolderID)
+                    Self.pagesServed = true
+                    return (Self.releaseInstanceIDs, Self.reportedItems, Self.reportedPages, Self.copiesFolderID)
                 }
                 let releases = ids.map { id in
                     """
@@ -195,6 +205,46 @@ struct CollectionSyncTests {
         )
         _ = try await syncer.reconcile()
         #expect(try await store.folders().map(\.id).sorted() == [1, 8])
+    }
+
+    @Test("A folder created while the pages come in is not missing once the sync completes")
+    func folderCreatedMidSyncIsCached() async throws {
+        let store = try makeStore()
+        let syncer = makeSyncer(store: store)
+
+        // The folder list is fetched before the pages and does not have Soul yet; the pages
+        // already file the copies in it.
+        StubProtocol.serve(
+            instanceIDs: [1, 2],
+            claimingItems: 2,
+            folders: [(1, "Uncategorized")],
+            copiesIn: 8,
+            foldersAfterPages: [(1, "Uncategorized"), (8, "Soul")]
+        )
+        _ = try await syncer.reconcile()
+        #expect(try await store.folders().map(\.id).sorted() == [1, 8])
+    }
+
+    @Test("A folder deleted while the pages come in stays while copies still name it")
+    func folderDeletedMidSyncStaysWhileNamed() async throws {
+        let store = try makeStore()
+        let syncer = makeSyncer(store: store)
+
+        // The pages still file the copies in Jazz, but by the second folder fetch it is gone.
+        StubProtocol.serve(
+            instanceIDs: [1, 2],
+            claimingItems: 2,
+            folders: [(1, "Uncategorized"), (7, "Jazz")],
+            copiesIn: 7,
+            foldersAfterPages: [(1, "Uncategorized")]
+        )
+        _ = try await syncer.reconcile()
+        #expect(try await store.folders().map(\.id).sorted() == [1, 7])
+
+        // Once the copies have moved, the next sync drops it.
+        StubProtocol.serve(instanceIDs: [1, 2], claimingItems: 2, folders: [(1, "Uncategorized")], copiesIn: 1)
+        _ = try await syncer.reconcile()
+        #expect(try await store.folders().map(\.id).sorted() == [1])
     }
 
     @Test("An emptied collection is still an emptied collection")

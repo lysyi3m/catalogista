@@ -157,13 +157,13 @@ struct CollectionStoreTests {
         let first = try decoder.decode([Folder].self, from: Data("""
         [{ "id": 0, "name": "All", "count": 70 }, { "id": 1, "name": "Uncategorized", "count": 70 }]
         """.utf8))
-        try await store.replaceFolders(first)
+        try await store.replaceFolders(first, keeping: [])
         #expect(try await store.folders().count == 2)
 
         let second = try decoder.decode([Folder].self, from: Data("""
         [{ "id": 0, "name": "All", "count": 71 }]
         """.utf8))
-        try await store.replaceFolders(second)
+        try await store.replaceFolders(second, keeping: [])
 
         let folders = try await store.folders()
         #expect(folders.map(\.id) == [0])
