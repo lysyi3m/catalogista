@@ -2,8 +2,11 @@ import DiscogsKit
 import Foundation
 import SwiftData
 
-/// Owns the SwiftData cache. A `@ModelActor` keeps every mutation on one context off the main
-/// thread, which a full-collection sync needs.
+/// Owns the SwiftData cache: every fetch and mutation on one context, serialised by the actor.
+///
+/// The context has no queue of its own, so the work runs on the calling thread — on the main
+/// thread when a main-actor caller awaits it. A sync stays off the main thread because its calls
+/// come from the `CollectionSyncer` actor; main-actor callers should touch a few rows at most.
 ///
 /// Discogs is canonical, so a sync upserts by `instanceID` and then drops every row Discogs no
 /// longer reports.
@@ -52,7 +55,16 @@ actor CollectionStore {
     /// During a sync, a copy removed on this device since the sync began is skipped: the page
     /// that still lists it was fetched before the removal.
     func upsert(_ items: [CollectionItem]) throws {
-        let existing = try existingItemsByInstanceID()
+        // Only this page's copies: fetching the whole collection for every page made a sync
+        // quadratic in the collection's size.
+        let incoming = items.map(\.instanceID)
+        let descriptor = FetchDescriptor<CachedCollectionItem>(
+            predicate: #Predicate { incoming.contains($0.instanceID) }
+        )
+        let existing = Dictionary(
+            try modelContext.fetch(descriptor).map { ($0.instanceID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let removed = writesDuringSync?.removed ?? []
         for item in items where !removed.contains(item.instanceID) {
             if let cached = existing[item.instanceID] {
@@ -227,12 +239,5 @@ actor CollectionStore {
             modelContext.rollback()
             throw error
         }
-    }
-
-    private func existingItemsByInstanceID() throws -> [Int: CachedCollectionItem] {
-        Dictionary(
-            try modelContext.fetch(FetchDescriptor<CachedCollectionItem>()).map { ($0.instanceID, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
     }
 }

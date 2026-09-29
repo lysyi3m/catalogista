@@ -1,13 +1,16 @@
 import CoreGraphics
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import Testing
 @testable import CatalogistaKit
 
-@Suite("ImageCache")
+/// Serialized: `CountingProtocol` holds one response for the whole suite, and tests that change it
+/// must not change it under each other.
+@Suite("ImageCache", .serialized)
 struct ImageCacheTests {
     @Test("Clearing the cache stops downloads in flight and leaves nothing behind")
     func removeAllCancelsInFlightDownloads() async throws {
-        SlowProtocol.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SlowProtocol.self]
         let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
@@ -38,6 +41,65 @@ struct ImageCacheTests {
         #expect(await cache.statistics().fileCount == 0, "the cleared cache must stay cleared")
     }
 
+    @Test("A cover on screen goes ahead of queued prefetches")
+    func visibleCoversJumpTheQueue() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SlowProtocol.self]
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        let cache = ImageCache(
+            directory: directory,
+            session: URLSession(configuration: configuration),
+            maximumConcurrentDownloads: 1
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A host of its own, so parallel tests' requests stay out of the recorded order.
+        func url(_ id: Int) -> URL { URL(string: "https://priority.test/\(id).jpeg")! }
+
+        // One slot: the first prefetch holds it, and two more wait behind it.
+        var downloads: [Task<Void, Never>] = []
+        for id in 1...3 {
+            downloads.append(Task { _ = try? await cache.localURL(releaseID: id, kind: .cover, remoteURL: url(id)) })
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        downloads.append(Task { _ = try? await cache.localURL(releaseID: 4, kind: .cover, remoteURL: url(4), priority: .visible) })
+        for download in downloads { await download.value }
+
+        #expect(SlowProtocol.started(onHost: "priority.test") == ["/1.jpeg", "/4.jpeg", "/2.jpeg", "/3.jpeg"])
+    }
+
+    /// A blank PNG of the given size.
+    private static func png(width: Int, height: Int) throws -> Data {
+        let context = try #require(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ))
+        let image = try #require(context.makeImage())
+        let data = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        #expect(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    @Test("An image past the pixel limit is refused from its header")
+    func oversizedImageIsRefused() throws {
+        #expect(ImageCache.isCompleteImage(try Self.png(width: 600, height: 600)))
+        #expect(ImageCache.isCompleteImage(try Self.png(width: ImageCache.maximumPixelDimension + 1, height: 1)) == false)
+    }
+
+    @Test("A response past the byte limit is refused and nothing is cached")
+    func oversizedResponseIsRefused() async throws {
+        CountingProtocol.serve(body: Data(count: ImageCache.maximumBytes + 1))
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        await #expect(throws: ImageCache.CacheError.self) {
+            try await cache.localURL(releaseID: 30, kind: .cover, remoteURL: URL(string: "https://i.discogs.com/huge.jpeg")!)
+        }
+        #expect(await cache.isCached(releaseID: 30, kind: .cover) == false)
+    }
+
     @Test("The default directory is durable, not the purgeable caches directory")
     func defaultDirectoryIsApplicationSupport() {
         let directory = ImageCache.defaultDirectory()
@@ -48,20 +110,28 @@ struct ImageCacheTests {
     }
 
     /// Serves a valid PNG, slowly, so downloads are still in flight when a test interrupts them.
+    /// Serves a valid PNG, slowly, so downloads are still in flight when a test interrupts them.
+    ///
+    /// No shared on/off state: tests using it run in parallel, and one test's cancellation must
+    /// not silence another's downloads. Cancellation is per request.
     final class SlowProtocol: URLProtocol, @unchecked Sendable {
-        nonisolated(unsafe) private static var cancelled = false
+        /// Request URLs in the order their transfers began, across every test. Filter by host.
+        nonisolated(unsafe) private static var startedURLs: [URL] = []
         private static let lock = NSLock()
+        private let stateLock = NSLock()
+        nonisolated(unsafe) private var isStopped = false
 
-        static func reset() {
-            lock.withLock { cancelled = false }
+        static func started(onHost host: String) -> [String] {
+            lock.withLock { startedURLs.filter { $0.host == host }.map(\.path) }
         }
 
         override class func canInit(with request: URLRequest) -> Bool { true }
         override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
         override func startLoading() {
+            if let url = request.url { Self.lock.withLock { Self.startedURLs.append(url) } }
             Thread.sleep(forTimeInterval: 0.4)
-            guard Self.lock.withLock({ !Self.cancelled }) else { return }
+            guard stateLock.withLock({ !isStopped }) else { return }
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil
             )!
@@ -71,7 +141,7 @@ struct ImageCacheTests {
         }
 
         override func stopLoading() {
-            Self.lock.withLock { Self.cancelled = true }
+            stateLock.withLock { isStopped = true }
         }
     }
 

@@ -75,7 +75,6 @@ struct SignOutTests {
 
     @Test("Signing out does not wait for the cover backlog")
     func signOutDoesNotDrainCovers() async throws {
-        ImageCacheTests.SlowProtocol.reset()
         let (services, tokenStore) = try makeServices()
         defer { try? tokenStore.delete() }
 
