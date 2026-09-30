@@ -47,8 +47,9 @@ actor ImageCache {
         }
     }
 
-    /// Far above any cover or release image Discogs serves (a 600px cover is about 100 KB). The
-    /// download stops as soon as a response passes it, so no more than this is ever held.
+    /// Far above any cover or release image Discogs serves (a 600px cover is about 100 KB). A
+    /// response is checked against it on disk, before it is read, so no more than this is ever
+    /// held in memory.
     static let maximumBytes = 20 * 1024 * 1024
     /// Checked from the image's header. Far above any image Discogs serves, and the pixels are only
     /// decoded to be drawn, downsampled; a format that cannot decode downsampled still costs no
@@ -298,18 +299,16 @@ actor ImageCache {
         var request = URLRequest(url: remoteURL)
         request.setValue(DiscogsUserAgent.value, forHTTPHeaderField: "User-Agent")
 
-        let (bytes, response) = try await session.bytes(for: request)
+        // To a file, so an oversized response is refused by its size on disk without ever being
+        // held in memory.
+        let (downloaded, response) = try await session.download(for: request)
+        defer { try? FileManager.default.removeItem(at: downloaded) }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw CacheError.badResponse(status: http.statusCode)
         }
-        // Streamed and capped, so an oversized response is refused without being held in full.
-        guard response.expectedContentLength <= Self.maximumBytes else { throw CacheError.tooLarge }
-        var data = Data()
-        data.reserveCapacity(max(0, Int(response.expectedContentLength)))
-        for try await byte in bytes {
-            data.append(byte)
-            guard data.count <= Self.maximumBytes else { throw CacheError.tooLarge }
-        }
+        let size = try downloaded.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? .max
+        guard size <= Self.maximumBytes else { throw CacheError.tooLarge }
+        let data = try Data(contentsOf: downloaded)
         // A 200 does not mean an image. CDNs answer with HTML error pages, empty bodies and
         // truncated responses, and a cached file is not fetched again while its URL stands — so
         // anything that is not a complete image must be rejected before it reaches the cache.

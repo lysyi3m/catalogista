@@ -101,8 +101,12 @@ struct ImageCacheTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let cache = makeCache(directory: directory)
-        await #expect(throws: ImageCache.CacheError.self) {
+        let error = await #expect(throws: ImageCache.CacheError.self) {
             try await cache.localURL(releaseID: 30, kind: .cover, remoteURL: URL(string: "https://i.discogs.com/huge.jpeg")!)
+        }
+        guard case .tooLarge = error else {
+            Issue.record("expected tooLarge, got \(String(describing: error))")
+            return
         }
         #expect(await cache.isCached(releaseID: 30, kind: .cover) == false)
     }
