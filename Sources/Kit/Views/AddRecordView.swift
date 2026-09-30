@@ -116,7 +116,7 @@ struct AddRecordView: View {
         #endif
     }
 
-    /// No title: the sheet is a search field and what it finds. "Find a Record" already sits in
+    /// No title: the sheet is a search field and what it finds. "Find a Release" already sits in
     /// the empty state, where the eye goes, and once results arrive the query is the context. A
     /// label repeating it above the field only crowds the control it introduces.
     private var header: some View {
@@ -251,7 +251,7 @@ struct AddRecordView: View {
     }
 
     private func addButton(for result: SearchResult) -> some View {
-        Button("Add") { Task { await add(result) } }
+        Button("Add Record") { Task { await add(result) } }
             .disabled(editor?.isWorking ?? false)
     }
 
@@ -297,7 +297,7 @@ struct AddRecordView: View {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         // Never fail silently: an unreachable client looks exactly like a search that did nothing.
         guard let search else {
-            noTokenMessage = "No Discogs token."
+            noTokenMessage = "Connect to Discogs to continue."
             return
         }
         noTokenMessage = nil
@@ -316,7 +316,7 @@ struct AddRecordView: View {
         switch state {
         case .idle:
             ContentUnavailableView(
-                "Find a Record",
+                "Find a Release",
                 systemImage: "magnifyingglass",
                 description: Text("Search Discogs for the release you own.")
             )
@@ -334,7 +334,7 @@ struct AddRecordView: View {
         case .loaded(let total) where results.isEmpty:
             ContentUnavailableView.search(text: query)
                 .overlay(alignment: .bottom) {
-                    if total > 0 { Text("No matches shown").font(.footnote) }
+                    if total > 0 { Text("No matching releases").font(.footnote) }
                 }
         case .loaded:
             List {

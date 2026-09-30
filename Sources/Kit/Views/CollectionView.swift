@@ -63,7 +63,7 @@ struct CollectionView: View {
             ContentUnavailableView(
                 "No Records",
                 systemImage: "folder",
-                description: Text("Folder “\(folderName)” is empty.")
+                description: Text("There are no records in “\(folderName)”.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // The title still names a Discogs folder, so the credit stays, on the bottom edge as

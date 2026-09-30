@@ -139,9 +139,9 @@ final class SyncController {
         var errorDescription: String? {
             switch self {
             case .noToken:
-                return "No Discogs token."
+                return "Connect to Discogs to continue."
             case .failed(let reason):
-                return ["Nothing was deleted.", reason].filter { !$0.isEmpty }.joined(separator: " ")
+                return ["Your cache has not been cleared.", reason].filter { !$0.isEmpty }.joined(separator: " ")
             }
         }
     }

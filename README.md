@@ -38,10 +38,10 @@ rejects them.
 ## Requirements
 
 - macOS 26 or iOS 26, or later
-- Xcode 26 or later and XcodeGen, to build
+- Xcode 27 and XcodeGen, to build
 - A Discogs account, to use
 
-## Build & run
+## Build and Run
 
 ```bash
 brew install xcodegen       # one-time
@@ -62,7 +62,7 @@ On first launch, paste a [Personal Access Token](https://www.discogs.com/setting
 It is validated against `/oauth/identity`, stored in the Keychain on that
 device, and never written to logs or `UserDefaults`.
 
-## How it works
+## How It Works
 
 Discogs is the source of truth; the local store is a cache. A refresh pages the
 collection and upserts by `instance_id`, dropping anything the server no longer
@@ -84,7 +84,7 @@ so the collection re-syncs every six hours and a record page older than that is
 fetched again. Offline, the cache stays browsable and the status line shows its
 age.
 
-## Project structure
+## Project Structure
 
 | Path | Purpose |
 | --- | --- |

@@ -1,4 +1,4 @@
-# Name and icon
+# Name and Icon
 
 The code in this repository is under the MIT license in [LICENSE](LICENSE). That license lets you
 copy, change and redistribute the code. It gives no right to use the "Catalogista" name or the app

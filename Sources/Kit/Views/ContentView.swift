@@ -153,7 +153,7 @@ public struct ContentView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { item in
-                Text("\(item.artistName) — \(item.title)\nThis removes the copy from Discogs.")
+                Text("\(item.artistName) — \(item.title)\nThis copy will be removed from your collection on Discogs.")
             }
             .collectionFailureAlert(editor)
     }
@@ -286,7 +286,7 @@ public struct ContentView: View {
             } actions: {
                 Button("Sync Now") { Task { await syncController.sync() } }
                     .disabled(syncController.isSyncing)
-                Button("Add a Record") { isAdding = true }
+                Button("Add Record") { isAdding = true }
             }
         } else {
             CollectionView(
@@ -400,7 +400,7 @@ public struct ContentView: View {
         if let errorMessage = editor?.errorMessage ?? syncController.errorMessage { return errorMessage }
         if syncController.isOffline { return offlineStatus }
         guard let lastSyncedAt = syncController.lastSyncedAt else { return "Not synced yet" }
-        return "Updated \(lastSyncedAt.formatted(.relative(presentation: .named)))"
+        return "Synced \(lastSyncedAt.formatted(.relative(presentation: .named)))"
     }
     #endif
 
@@ -408,11 +408,11 @@ public struct ContentView: View {
     /// bound how stale displayed data may be. See `Freshness`.
     private var offlineStatus: String {
         guard let lastSyncedAt = syncController.lastSyncedAt else { return "Offline" }
-        return "Offline · updated \(lastSyncedAt.formatted(.relative(presentation: .named)))"
+        return "Offline · synced \(lastSyncedAt.formatted(.relative(presentation: .named)))"
     }
 
     private var initialSyncStatus: String {
-        guard let progress = syncController.progress else { return "Fetching collection…" }
+        guard let progress = syncController.progress else { return "Syncing collection…" }
         return "\(progress.itemsFetched) of \(progress.totalItems) records"
     }
 

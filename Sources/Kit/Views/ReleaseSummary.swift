@@ -72,7 +72,7 @@ struct EditionFacts: View {
     }
 
     static let label = "Label"
-    static let catalogNumber = "Catalog number"
+    static let catalogNumber = "Catalog Number"
     static let released = "Released"
     /// Discogs mixes countries with regions ("Europe"), compounds ("UK & Europe") and historical
     /// states, and sends abbreviations rather than CLDR names, so the value cannot be classified
