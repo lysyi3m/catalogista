@@ -250,8 +250,14 @@ struct AddRecordView: View {
         #endif
     }
 
+    /// "Add" on iOS, where the navigation title beside it already says "Add Record".
     private func addButton(for result: SearchResult) -> some View {
-        Button("Add Record") { Task { await add(result) } }
+        #if os(iOS)
+        let label = "Add"
+        #else
+        let label = "Add Record"
+        #endif
+        return Button(label) { Task { await add(result) } }
             .disabled(editor?.isWorking ?? false)
     }
 

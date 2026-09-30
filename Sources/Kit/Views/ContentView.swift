@@ -21,6 +21,7 @@ public struct ContentView: View {
     /// Room under the folder list, which pins its credit to the bottom edge. See `creditSlack(_:)`.
     @State private var sidebarCreditSlack: CGFloat = 0
     @State private var sidebarCreditSpacing = ListCreditSpacing()
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
     @AppStorage("collectionSort") private var sortRaw = CollectionSortOption.default.rawValue
@@ -205,6 +206,13 @@ public struct ContentView: View {
                 listTrailing: sidebarCreditSpacing.trailing
             )
             .creditRow(sidebarCreditSpacing)
+            // Collapsed to a stack, the sidebar is an inset-grouped list, which draws a row's
+            // platter even when told clear; with the slack above the credit that was an empty
+            // white card. The list's own background hides it. The iPad sidebar has no platter and
+            // a background of its own, so there the row stays clear.
+            .listRowBackground(
+                horizontalSizeClass == .compact ? Color(.systemGroupedBackground) : Color.clear
+            )
             #endif
         }
         #if os(iOS)

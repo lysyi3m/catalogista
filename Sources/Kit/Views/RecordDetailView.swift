@@ -192,7 +192,7 @@ struct RecordDetailView: View {
     private var notes: some View {
         if let notes = detail?.notes, !notes.isEmpty {
             PageSection("Notes") {
-                Text(notes)
+                Text(DiscogsMarkup.attributed(notes))
                     .font(.callout)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
