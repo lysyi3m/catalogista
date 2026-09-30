@@ -66,6 +66,8 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSHumanReadableCopyright: "© 2026 Emil Kashkevich · MIT License"
         ITSAppUsesNonExemptEncryption: false
+        # Required by the Mac App Store; iOS takes its category from App Store Connect.
+        LSApplicationCategoryType: public.app-category.music
         UILaunchScreen: {}
         # Ignored on macOS. Without these an iOS Release build warns, and the app would inherit
         # whatever the toolchain defaults to rather than what it was designed for.
