@@ -35,7 +35,7 @@ actor CollectionSyncer {
         var errorDescription: String? {
             switch self {
             case .incompleteCollection:
-                return "Sync incomplete. Nothing was removed."
+                return "The sync could not be completed. No records were removed from the cache."
             }
         }
     }

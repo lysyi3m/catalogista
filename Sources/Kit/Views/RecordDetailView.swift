@@ -85,7 +85,7 @@ struct RecordDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\(item.artistName) — \(item.title)\nThis removes the copy from Discogs.")
+            Text("\(item.artistName) — \(item.title)\nThis copy will be removed from your collection on Discogs.")
         }
         .collectionFailureAlert(editor)
     }
@@ -105,7 +105,7 @@ struct RecordDetailView: View {
                 Button(role: .destructive) {
                     isConfirmingRemoval = true
                 } label: {
-                    Label("Remove from Collection", systemImage: "trash")
+                    Label("Remove from Collection…", systemImage: "trash")
                 }
                 .disabled(editor?.isWorking ?? true)
             } label: {
@@ -213,7 +213,7 @@ struct RecordDetailView: View {
                 }
             }
         case .loaded:
-            Text("No tracklist on Discogs.")
+            Text("No tracklist on Discogs")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         case .failed(let message):
@@ -224,7 +224,7 @@ struct RecordDetailView: View {
                 }
             }
         case .loading, nil:
-            Text("Loading…")
+            Text("Loading details…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }

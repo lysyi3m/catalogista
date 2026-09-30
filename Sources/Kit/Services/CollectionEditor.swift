@@ -55,7 +55,7 @@ final class CollectionEditor {
 
         func rejected(_ error: any Error) {
             failure = Failure(
-                title: "Couldn't add \(result.title)",
+                title: "Unable to Add “\(result.title)”",
                 message: error.localizedDescription,
                 retry: { [weak self] in _ = await self?.add(result, folderID: folderID) }
             )
@@ -152,7 +152,7 @@ final class CollectionEditor {
         do {
             snapshot = try await services.store.item(instanceID: instanceID)
         } catch {
-            rejected(error, title: "Couldn't remove the copy")
+            rejected(error, title: "Unable to Remove Copy")
             return false
         }
         guard let snapshot else { return false }
@@ -160,7 +160,7 @@ final class CollectionEditor {
         do {
             try await services.store.deleteItem(instanceID: instanceID)
         } catch {
-            rejected(error, title: "Couldn't remove \(snapshot.title)")
+            rejected(error, title: "Unable to Remove “\(snapshot.title)”")
             return false
         }
         // Protected from syncs until the removal ends. See `CollectionStore.writes`.
@@ -191,7 +191,7 @@ final class CollectionEditor {
                 await services.store.settleWrites([instanceID])
                 return await reconcileRemove(of: snapshot, after: error)
             }
-            rejected(error, title: "Couldn't remove \(snapshot.title)")
+            rejected(error, title: "Unable to Remove “\(snapshot.title)”")
             try? await services.store.restore(snapshot)
             return false
         }
@@ -218,8 +218,8 @@ final class CollectionEditor {
     ) async -> Bool {
         guard await services.syncController.syncAfterWrite() else {
             failure = Failure(
-                title: "Couldn't confirm the add",
-                message: "\(result.title) may or may not have been added. Sync when you are back online to find out.",
+                title: "Unable to Confirm Addition",
+                message: "“\(result.title)” may have been added to your collection. Sync your collection to confirm.",
                 retry: nil
             )
             return false
@@ -230,7 +230,7 @@ final class CollectionEditor {
         if copiesNow.subtracting(knownCopies).isEmpty == false { return true }
         // Verified absent, so a retry is safe to offer.
         failure = Failure(
-            title: "Couldn't add \(result.title)",
+            title: "Unable to Add “\(result.title)”",
             message: error.localizedDescription,
             retry: { [weak self] in _ = await self?.add(result, folderID: folderID) }
         )
@@ -240,8 +240,8 @@ final class CollectionEditor {
     private func reconcileRemove(of snapshot: CollectionItemSnapshot, after error: any Error) async -> Bool {
         guard await services.syncController.syncAfterWrite() else {
             failure = Failure(
-                title: "Couldn't confirm the removal",
-                message: "\(snapshot.title) may or may not have been removed. Sync when you are back online to find out.",
+                title: "Unable to Confirm Removal",
+                message: "“\(snapshot.title)” may have been removed from your collection. Sync your collection to confirm.",
                 retry: nil
             )
             return false
@@ -249,7 +249,7 @@ final class CollectionEditor {
         // The sync restores the copy if Discogs still has it, and leaves it gone if not.
         if (try? await services.store.item(instanceID: snapshot.instanceID)) == nil { return true }
         failure = Failure(
-            title: "Couldn't remove \(snapshot.title)",
+            title: "Unable to Remove “\(snapshot.title)”",
             message: error.localizedDescription,
             retry: { [weak self] in _ = await self?.remove(instanceID: snapshot.instanceID) }
         )

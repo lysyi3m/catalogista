@@ -278,7 +278,7 @@ struct WriteFailureTests {
         #expect(await editor.remove(instanceID: 111) == false)
         let failure = try #require(editor.failure)
         #expect(failure.retry == nil, "retrying an unverifiable write can mislead")
-        #expect(failure.message.contains("may or may not"))
+        #expect(failure.message.contains("may have been removed"))
     }
 
     @Test("A rejected removal offers a retry that actually removes the copy")

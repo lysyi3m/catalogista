@@ -75,7 +75,7 @@ struct CollectionSettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Downloads the collection again. Your Discogs collection is unchanged.")
+                Text("This downloads your collection again. Your collection on Discogs will not change.")
             }
     }
 
@@ -94,16 +94,16 @@ struct CollectionSettingsView: View {
     @ViewBuilder
     private var sections: some View {
         Section("Sync") {
-            LabeledContent("Last synced", value: lastSyncedText)
+            LabeledContent("Last Synced", value: lastSyncedText)
             if let summary {
                 LabeledContent("Records", value: "\(summary.items)")
                 LabeledContent("Folders", value: "\(summary.folders)")
             }
         }
 
-        Section("Cover art") {
+        Section("Cover Art") {
             if let summary {
-                LabeledContent("Images on disk", value: "\(summary.images.fileCount)")
+                LabeledContent("Images on Disk", value: "\(summary.images.fileCount)")
                 LabeledContent(
                     "Size",
                     value: summary.images.byteCount.formatted(.byteCount(style: .file))
@@ -117,7 +117,7 @@ struct CollectionSettingsView: View {
             HStack(spacing: 10) {
                 Button("Sync Now") { Task { await syncNow() } }
                     .disabled(isWorking || !services.hasToken)
-                Button("Reset Cache", role: .destructive) { isConfirmingReset = true }
+                Button("Reset Cache…", role: .destructive) { isConfirmingReset = true }
                     .disabled(isWorking || !services.hasToken)
 
                 Spacer(minLength: 8)
@@ -201,7 +201,7 @@ struct AccountSettingsView: View {
                 Button("Disconnect", role: .destructive) { Task { await signOut() } }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Removes the token and cached collection from this device. Your Discogs collection is unchanged.")
+                Text("This removes your token and cached collection from this device. Your collection on Discogs will not change.")
             }
     }
 
@@ -216,7 +216,7 @@ struct AccountSettingsView: View {
 
     @ViewBuilder
     private var sections: some View {
-        Section("Discogs account") {
+        Section("Discogs Account") {
             LabeledContent("Username", value: services.accountUsername ?? "Unknown")
             LabeledContent("Token") {
                 Text(services.maskedToken ?? "None")
@@ -226,13 +226,13 @@ struct AccountSettingsView: View {
         }
 
         Section {
-            Button("Disconnect Account", role: .destructive) { isConfirmingSignOut = true }
+            Button("Disconnect Account…", role: .destructive) { isConfirmingSignOut = true }
                 .disabled(!services.hasToken)
             if let errorMessage {
                 Text(errorMessage).font(.footnote).foregroundStyle(.red)
             }
         } footer: {
-            Text("Stored in the Keychain on this device.")
+            Text("Stored securely in this device’s Keychain")
         }
     }
 

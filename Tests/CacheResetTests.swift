@@ -52,7 +52,7 @@ struct CacheResetTests {
             try await services.syncController.resetAndResync()
             Issue.record("expected the reset to fail without a token")
         } catch let error as SyncController.ResetError {
-            #expect(error.localizedDescription.contains("No Discogs token"))
+            #expect(error.localizedDescription.contains("Connect to Discogs"))
         }
     }
 

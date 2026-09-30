@@ -60,7 +60,7 @@ final class ReleaseDetailLoader {
             // page stays blank for as long as the request takes, rate-limit waits included.
             if let cached { state = .loaded(cached) }
             guard let client = services.client else {
-                state = cached.map(State.loaded) ?? .failed("No Discogs token.")
+                state = cached.map(State.loaded) ?? .failed("Connect to Discogs to continue.")
                 return
             }
             let release = try await client.release(id: releaseID)

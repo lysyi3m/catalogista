@@ -79,23 +79,25 @@ extension DiscogsError: LocalizedError {
         case .unauthorized(let message):
             return message ?? "Discogs rejected the token."
         case .notFound(let message):
-            return message ?? "Not found."
+            return message ?? "The requested item was not found."
         case .rateLimited(let retryAfter):
             if let retryAfter {
-                return "Rate limited by Discogs. Try again in \(Int(retryAfter.rounded()))s."
+                let seconds = Int(retryAfter.rounded())
+                let unit = seconds == 1 ? "second" : "seconds"
+                return "Discogs is temporarily limiting requests. Try again in \(seconds) \(unit)."
             }
-            return "Rate limited by Discogs."
+            return "Discogs is temporarily limiting requests. Try again shortly."
         case .http(let status, let message):
             return message ?? "Discogs returned HTTP \(status)."
         case .decoding:
-            return "Couldn't read the Discogs response."
+            return "Could not read the Discogs response."
         case .transport:
             return isOffline
                 ? "No connection to Discogs."
-                : "Couldn't reach Discogs."
+                : "Could not reach Discogs."
 
         case .invalidURL:
-            return "Invalid request URL."
+            return "The request URL is invalid."
         }
     }
 }

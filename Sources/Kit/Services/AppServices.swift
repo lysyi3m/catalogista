@@ -50,7 +50,7 @@ public final class AppServices {
             cachedUsername = stored
             return stored
         }
-        guard let client else { throw DiscogsError.unauthorized(message: "No Discogs token.") }
+        guard let client else { throw DiscogsError.unauthorized(message: "Connect to Discogs to continue.") }
         let identity = try await client.identity()
         rememberUsername(identity.username)
         return identity.username
