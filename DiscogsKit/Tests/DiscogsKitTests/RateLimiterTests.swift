@@ -77,6 +77,24 @@ struct RateLimiterTests {
 
         let capped = await limiter.backoffDelay(retryAfter: nil, attempt: 20)
         #expect(capped <= 60)
+
+        let serverSays = await limiter.backoffDelay(retryAfter: 120, attempt: 0)
+        #expect(serverSays == 120, "the cap bounds the computed delay, not the server's Retry-After")
+    }
+
+    @Test("A success that lands during a 429 block does not lift it")
+    func lateSuccessKeepsTheBlock() async throws {
+        let limiter = RateLimiter(limit: 60, safetyMargin: 5, baseBackoff: 0.01, maximumBackoff: 0.02)
+        let blocked = Task { try await limiter.noteRateLimited(retryAfter: 0.5, attempt: 0) }
+        try await Task.sleep(for: .milliseconds(50))
+
+        // The answer to a request sent before the 429.
+        await limiter.update(from: try response(limit: "60", used: "30", remaining: "30"))
+        guard case .wait = await limiter.decision(at: Date()) else {
+            Issue.record("the block must hold until its deadline")
+            return
+        }
+        _ = try await blocked.value
     }
 }
 

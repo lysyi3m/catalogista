@@ -67,14 +67,14 @@ struct ImageCacheTests {
         #expect(SlowProtocol.started(onHost: "priority.test") == ["/1.jpeg", "/4.jpeg", "/2.jpeg", "/3.jpeg"])
     }
 
-    private static func png(width: Int, height: Int) throws -> Data {
+    private static func image(width: Int, height: Int, type: UTType = .png) throws -> Data {
         let context = try #require(CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
         ))
         let image = try #require(context.makeImage())
         let data = NSMutableData()
-        let destination = try #require(CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil))
+        let destination = try #require(CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
         #expect(CGImageDestinationFinalize(destination))
         return data as Data
@@ -82,8 +82,16 @@ struct ImageCacheTests {
 
     @Test("An image past the pixel limit is refused from its header")
     func oversizedImageIsRefused() throws {
-        #expect(ImageCache.isCompleteImage(try Self.png(width: 600, height: 600)))
-        #expect(ImageCache.isCompleteImage(try Self.png(width: ImageCache.maximumPixelDimension + 1, height: 1)) == false)
+        #expect(ImageCache.isCompleteImage(try Self.image(width: 600, height: 600)))
+        #expect(ImageCache.isCompleteImage(try Self.image(width: ImageCache.maximumPixelDimension + 1, height: 1)) == false)
+    }
+
+    @Test("An image cut off partway through its pixels is refused", arguments: [UTType.jpeg, .png])
+    func imageCutOffIsRefused(type: UTType) throws {
+        let whole = try Self.image(width: 600, height: 600, type: type)
+        #expect(ImageCache.isCompleteImage(whole))
+        #expect(ImageCache.isCompleteImage(whole.prefix(whole.count / 2)) == false)
+        #expect(ImageCache.isCompleteImage(whole.prefix(whole.count - 1)) == false)
     }
 
     @Test("A response past the byte limit is refused and nothing is cached")

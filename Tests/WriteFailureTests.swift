@@ -188,7 +188,7 @@ struct WriteFailureTests {
         #expect(FlakyProtocol.lastWritePath?.contains("/collection/folders/5/releases/500") == true)
     }
 
-    @Test("A reset whose download fails says so, rather than reporting a rebuilt cache")
+    @Test("A reset whose download fails says so, and keeps the old cache")
     func failedRebuildIsReported() async throws {
         FlakyProtocol.reset()
         FlakyProtocol.failReads = true
@@ -202,12 +202,33 @@ struct WriteFailureTests {
             try await services.syncController.resetAndResync()
             Issue.record("expected the rebuild to fail")
         } catch let error as SyncController.ResetError {
-            guard case .rebuildFailed = error else {
-                Issue.record("expected rebuildFailed, got \(error)")
+            guard case .failed = error else {
+                Issue.record("expected failed, got \(error)")
                 return
             }
         }
         #expect(services.syncController.errorMessage != nil, "the collection screen must show it too")
+        #expect(try await services.store.itemCount() == 1, "nothing is cleared before the download completes")
+    }
+
+    @Test("A reset that completes drops release details, and keeps the collection")
+    func completedRebuildDropsDetails() async throws {
+        FlakyProtocol.reset()
+        FlakyProtocol.collectionInstanceIDs = [111]
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+        let release = try DiscogsClient.makeDecoder().decode(Release.self, from: Data("""
+            {"id":500,"title":"Remain In Light","artists":[],"labels":[],"formats":[],
+             "genres":[],"styles":[],"tracklist":[],"images":[]}
+            """.utf8))
+        try await services.store.upsertReleaseDetail(release)
+
+        try await services.syncController.resetAndResync()
+
+        #expect(try await services.store.releaseDetail(releaseID: 500) == nil)
+        #expect(try await services.store.itemCount() == 1)
     }
 
     @Test("A removal Discogs has already applied is not undone")

@@ -26,7 +26,7 @@ final class SyncController {
     /// Cover downloads, which outlive the sync that scheduled them. Tracked so sign-out can stop
     /// them: they write files for whichever account asked for them.
     private var warmingArtwork: Task<Void, Never>?
-    private static let lastSyncedKey = "lastSyncedAt"
+    nonisolated static let lastSyncedKey = "lastSyncedAt"
 
     init(services: AppServices) {
         self.services = services
@@ -96,8 +96,8 @@ final class SyncController {
     /// fetch that is cancelled mid-stream returns no pages at all. A refresh the user asked for is
     /// worth finishing. The task is kept so `cancelAndWait` can still stop it deliberately — being
     /// shielded from the caller is not the same as being unstoppable.
-    private func runSync() async -> Bool {
-        let task = Task { await self.performSync() }
+    private func runSync(rebuilding: Bool = false) async -> Bool {
+        let task = Task { await self.performSync(rebuilding: rebuilding) }
         running = task
         let succeeded = await task.value
         running = nil
@@ -134,69 +134,50 @@ final class SyncController {
 
     enum ResetError: LocalizedError {
         case noToken
-        case unreachable(String)
-        /// The cache was cleared and the download did not finish. The collection on screen is
-        /// empty or partial until a sync succeeds.
-        case rebuildFailed(String)
+        case failed(String)
 
         var errorDescription: String? {
             switch self {
             case .noToken:
                 return "No Discogs token."
-            case .unreachable(let reason):
-                return "Nothing was deleted. \(reason)"
-            case .rebuildFailed(let reason):
-                return ["The cache was cleared, but the download did not finish.", reason, "Sync to try again."]
-                    .filter { !$0.isEmpty }
-                    .joined(separator: " ")
+            case .failed(let reason):
+                return ["Nothing was deleted.", reason].filter { !$0.isEmpty }.joined(separator: " ")
             }
         }
     }
 
-    /// Clears the cache and rebuilds it.
+    /// Syncs, then drops every release detail and cover so they are fetched again.
     ///
-    /// Discogs is checked first, because the cache is the only copy of the collection this device
-    /// has. Clearing it and then failing to download would leave nothing to browse — exactly when
-    /// the user is offline and the cache matters most. The check cannot promise the download will
-    /// work, so a failed download throws rather than reading as a rebuilt cache.
-    ///
-    /// `isSyncing` covers the whole operation, including the gap between the cache emptying and
-    /// the download starting — otherwise the grid flashes its empty state in that window.
+    /// The cache is the only copy of the collection this device has, so nothing is dropped until
+    /// the whole collection has downloaded and checked out (`CollectionSyncer.reconcile(rebuilding:)`).
+    /// A download that fails, offline most likely, leaves the cache browsable and says so.
     func resetAndResync() async throws {
         guard !isSyncing else { return }
-        guard let client = services.client else { throw ResetError.noToken }
+        guard services.client != nil else { throw ResetError.noToken }
 
         isSyncing = true
-        activity = "Checking connection…"
+        activity = "Downloading collection…"
         defer {
             isSyncing = false
             activity = nil
             progress = nil
         }
 
-        do {
-            _ = try await client.identity()
-        } catch {
-            let reason = (error as? DiscogsError)?.localizedDescription ?? error.localizedDescription
-            throw ResetError.unreachable(reason)
-        }
-
-        activity = "Clearing cache…"
-        try await services.resetCache()
-        activity = "Downloading collection…"
-        // A failure here leaves an empty or partial cache, so it is a failure even when the cause
-        // is being offline, and the error stays on the collection screen too.
-        guard await runSync() else {
-            throw ResetError.rebuildFailed(errorMessage ?? "")
+        guard await runSync(rebuilding: true) else {
+            let reason = errorMessage ?? ""
+            // The cache is intact, so on the collection screen being offline is a status line, as
+            // after any failed sync.
+            if isOffline { errorMessage = nil }
+            throw ResetError.failed(reason)
         }
     }
 
-    private func performSync() async -> Bool {
+    private func performSync(rebuilding: Bool = false) async -> Bool {
         guard let syncer = services.makeSyncer() else { return false }
         errorMessage = nil
 
         do {
-            let summary = try await syncer.reconcile { update in
+            let summary = try await syncer.reconcile(rebuilding: rebuilding) { update in
                 Task { @MainActor in self.progress = update }
             }
             lastSummary = summary
@@ -214,8 +195,7 @@ final class SyncController {
             return false
         } catch {
             isOffline = (error as? DiscogsError)?.isOffline ?? false
-            // Always recorded here. Callers for which being offline is merely a status clear it;
-            // callers that have already destroyed something must not.
+            // Always recorded here; callers for which being offline is merely a status clear it.
             errorMessage = error.localizedDescription
             return false
         }

@@ -57,12 +57,20 @@ actor CollectionSyncer {
     /// image downloads only makes a finished sync look stuck.
     ///
     /// - Parameter onProgress: called after each page so the UI can fill in during a first sync.
+    ///
+    /// - Parameter rebuilding: also drop every release detail and cover once the collection is in,
+    ///   so they are fetched again (Settings ▸ Reset Cache). Nothing is dropped before the whole
+    ///   collection has downloaded and checked out, so a download that fails leaves the cache as it
+    ///   was.
     @discardableResult
-    func reconcile(onProgress: (@Sendable (Progress) -> Void)? = nil) async throws -> Summary {
+    func reconcile(
+        rebuilding: Bool = false,
+        onProgress: (@Sendable (Progress) -> Void)? = nil
+    ) async throws -> Summary {
         // Writes made while the pages come in are recorded, so the reconciliation respects them.
         await store.beginSync()
         do {
-            let summary = try await fetchAndReconcile(onProgress: onProgress)
+            let summary = try await fetchAndReconcile(rebuilding: rebuilding, onProgress: onProgress)
             await store.endSync()
             return summary
         } catch {
@@ -71,7 +79,10 @@ actor CollectionSyncer {
         }
     }
 
-    private func fetchAndReconcile(onProgress: (@Sendable (Progress) -> Void)?) async throws -> Summary {
+    private func fetchAndReconcile(
+        rebuilding: Bool,
+        onProgress: (@Sendable (Progress) -> Void)?
+    ) async throws -> Summary {
         let identity = try await client.identity()
 
         try await store.upsertFolders(try await client.folders(user: identity.username))
@@ -128,12 +139,17 @@ actor CollectionSyncer {
               seenInstanceIDs.count == reportedItems else {
             throw SyncError.incompleteCollection(seen: seenInstanceIDs.count, expected: reportedItems ?? 0)
         }
-        let itemsRemoved = try await store.pruneItems(keeping: seenInstanceIDs)
         // Fetched again, so the list is at least as new as the copies: a folder created while the
         // pages came in is not missing from it. Removed folders go only now, and never one a copy
         // still names. See `replaceFolders(_:keeping:)`.
         let folders = try await client.folders(user: identity.username)
+
+        let itemsRemoved = try await store.pruneItems(keeping: seenInstanceIDs)
         try await store.replaceFolders(folders, keeping: seenFolderIDs)
+        if rebuilding {
+            try await store.pruneReleaseDetails(keeping: [])
+            try await imageCache.removeAll()
+        }
 
         // Only after a complete fetch, like pruning copies. Read from the store rather than the
         // pages, so a copy added on this device while they came in keeps its art and details.

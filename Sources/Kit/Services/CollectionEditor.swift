@@ -74,6 +74,10 @@ final class CollectionEditor {
             rejected(error)
             return false
         }
+        // The store protects this copy from syncs while the add is in flight; however the add
+        // ends, the protection is released. See `CollectionStore.writes`.
+        var touched: Set<Int> = [provisionalID]
+        defer { Task { [store = services.store, touched] in await store.settleWrites(touched) } }
 
         // Only a failure of the POST itself means the copy was not added. Anything that goes
         // wrong afterwards happens with the copy already on Discogs, and rolling the row back
@@ -98,16 +102,21 @@ final class CollectionEditor {
                 rejected(error)
                 return false
             }
+            // Settled first: the sync below is how this add is judged, and must see Discogs as is.
+            await services.store.settleWrites(touched)
             return await reconcileAdd(of: result, folderID: folderID, knownCopies: copiesBefore, after: error)
         }
 
         // The copy is on the old account's Discogs; this cache no longer belongs to it.
         guard !hasDisconnected(since: generation) else { return true }
+        touched.insert(addition.instanceID)
         do {
             try await services.store.reassignInstanceID(from: provisionalID, to: addition.instanceID)
         } catch {
             // The copy exists upstream but this device could not record its id. A refresh
-            // reconciles by instance_id, replacing the provisional row with the real one.
+            // reconciles by instance_id, replacing the provisional row with the real one — once
+            // the provisional row is no longer protected.
+            await services.store.settleWrites(touched)
             await services.syncController.sync()
             return true
         }
@@ -154,6 +163,8 @@ final class CollectionEditor {
             rejected(error, title: "Couldn't remove \(snapshot.title)")
             return false
         }
+        // Protected from syncs until the removal ends. See `CollectionStore.writes`.
+        defer { Task { [store = services.store] in await store.settleWrites([instanceID]) } }
 
         do {
             let username = try await services.username()
@@ -175,6 +186,9 @@ final class CollectionEditor {
             guard (error as? DiscogsError)?.didNotReachDiscogs ?? false else {
                 // The delete may have been applied. Let Discogs settle it rather than restoring a
                 // copy that is no longer there.
+                // Settled first: the sync below judges the removal, so it must be free to put the
+                // copy back if Discogs still has it.
+                await services.store.settleWrites([instanceID])
                 return await reconcileRemove(of: snapshot, after: error)
             }
             rejected(error, title: "Couldn't remove \(snapshot.title)")

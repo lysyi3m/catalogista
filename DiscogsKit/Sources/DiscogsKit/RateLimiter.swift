@@ -109,8 +109,11 @@ public actor RateLimiter {
         if let current = remaining { remaining = max(current - 1, 0) }
     }
 
-    /// Absorbs the rate-limit headers from a response. Any response other than a 429 clears an
-    /// active 429 block.
+    /// Absorbs the rate-limit headers from a response.
+    ///
+    /// A 429 block is left alone: a success that arrives now may answer a request sent before the
+    /// 429, and says nothing about whether the server's block is over. The block ends at its
+    /// deadline.
     public func update(from response: HTTPURLResponse) {
         if let value = response.value(forHTTPHeaderField: "X-Discogs-Ratelimit"),
            let parsed = Int(value.trimmingCharacters(in: .whitespaces)), parsed > 0 {
@@ -125,9 +128,6 @@ public actor RateLimiter {
             remaining = parsed
             remainingObservedAt = Date()
         }
-        if response.statusCode != 429 {
-            blockedUntil = nil
-        }
     }
 
     /// Records a 429 and blocks all callers for the backoff interval. Returns the delay applied.
@@ -136,8 +136,8 @@ public actor RateLimiter {
         let delay = backoffDelay(retryAfter: retryAfter, attempt: attempt)
         let until = Date().addingTimeInterval(delay)
         if (blockedUntil ?? .distantPast) < until { blockedUntil = until }
-        // A 429 means the window is already full. Drop local history so it rebuilds after the block.
-        sendTimestamps.removeAll()
+        // Local send history is kept: the sends in it are still inside the server's moving window,
+        // and forgetting them would let a burst go out the moment a short block ends.
         try await sleep(until: until)
         // The backoff has passed, so the counts that came with the 429 describe a window that is
         // over. Keeping them would gate every later request on a reading that can never refresh.
@@ -155,8 +155,10 @@ public actor RateLimiter {
     func backoffDelay(retryAfter: TimeInterval?, attempt: Int) -> TimeInterval {
         let exponential = min(baseBackoff * pow(2, Double(max(attempt, 0))), maximumBackoff)
         // Jitter spreads retries when several requests are throttled together.
-        let jittered = exponential * Double.random(in: 0.8...1.2)
-        return min(max(jittered, retryAfter ?? 0), maximumBackoff)
+        let jittered = min(exponential * Double.random(in: 0.8...1.2), maximumBackoff)
+        // The cap bounds our own guess, never the server's: retrying before its Retry-After only
+        // earns another 429.
+        return max(jittered, retryAfter ?? 0)
     }
 
     private func prune(now: Date) {

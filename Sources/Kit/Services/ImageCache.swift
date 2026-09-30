@@ -47,12 +47,13 @@ actor ImageCache {
         }
     }
 
-    /// Far above any cover or release image Discogs serves (a 600px cover is about 100 KB), and
-    /// far below what would strain memory: the whole response is held before it is checked.
+    /// Far above any cover or release image Discogs serves (a 600px cover is about 100 KB). The
+    /// download stops as soon as a response passes it, so no more than this is ever held.
     static let maximumBytes = 20 * 1024 * 1024
-    /// Checked from the image's header before it is decoded in full. A full decode of a larger
-    /// image costs hundreds of megabytes for a picture drawn a few hundred points wide.
-    static let maximumPixelDimension = 8000
+    /// Checked from the image's header. Far above any image Discogs serves, and the pixels are only
+    /// decoded to be drawn, downsampled; a format that cannot decode downsampled still costs no
+    /// more than 64 MB at this size.
+    static let maximumPixelDimension = 4000
 
     private let directory: URL
     private let session: URLSession
@@ -297,18 +298,22 @@ actor ImageCache {
         var request = URLRequest(url: remoteURL)
         request.setValue(DiscogsUserAgent.value, forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await session.data(for: request)
+        let (bytes, response) = try await session.bytes(for: request)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw CacheError.badResponse(status: http.statusCode)
         }
-        guard data.count <= Self.maximumBytes else { throw CacheError.tooLarge }
+        // Streamed and capped, so an oversized response is refused without being held in full.
+        guard response.expectedContentLength <= Self.maximumBytes else { throw CacheError.tooLarge }
+        var data = Data()
+        data.reserveCapacity(max(0, Int(response.expectedContentLength)))
+        for try await byte in bytes {
+            data.append(byte)
+            guard data.count <= Self.maximumBytes else { throw CacheError.tooLarge }
+        }
         // A 200 does not mean an image. CDNs answer with HTML error pages, empty bodies and
         // truncated responses, and a cached file is not fetched again while its URL stands — so
         // anything that is not a complete image must be rejected before it reaches the cache.
-        // Off the actor: a full decode takes long enough to hold up every other cover's lookup.
-        guard await Task.detached(operation: { Self.isCompleteImage(data) }).value else {
-            throw CacheError.notAnImage
-        }
+        guard Self.isCompleteImage(data) else { throw CacheError.notAnImage }
 
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
@@ -338,28 +343,51 @@ actor ImageCache {
         return destination
     }
 
-    /// Whether `data` is an image the system can decode in full.
+    /// Whether `data` is a whole image of a size worth decoding, judged without decoding it.
     ///
-    /// The container checks are cheap early-outs: an HTML body has no image type and an empty one
-    /// has no frames. They are not sufficient on their own — a source built from a complete `Data`
-    /// reports `statusComplete` even when the pixel data is truncated — so the image is decoded
-    /// once to be sure. That cost is paid on first download only, and keeping a file until its
-    /// URL changes makes a corrupt file expensive to accept.
+    /// A decode proves nothing here: ImageIO fills in the missing rows of a truncated JPEG or PNG
+    /// and reports success, and a full decode of a large image costs hundreds of megabytes. So the
+    /// header gives the type and size, and the format's end marker shows the file is all there.
     nonisolated static func isCompleteImage(_ data: Data) -> Bool {
         guard !data.isEmpty,
               let source = CGImageSourceCreateWithData(
                   data as CFData,
                   [kCGImageSourceShouldCache: false] as CFDictionary
               ),
-              CGImageSourceGetType(source) != nil,
+              let identifier = CGImageSourceGetType(source),
+              let type = UTType(identifier as String),
               CGImageSourceGetCount(source) > 0,
               hasAcceptableSize(source)
         else { return false }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil) != nil
+        return hasEndMarker(data, type: type)
+    }
+
+    /// Whether the file ends the way its format says a complete file ends. A format with no end
+    /// marker checked here passes on its header alone.
+    nonisolated static func hasEndMarker(_ data: Data, type: UTType) -> Bool {
+        if type.conforms(to: .jpeg) {
+            // End of image. Encoders may pad after it, so the last few bytes are searched.
+            let tail = data.suffix(16)
+            return zip(tail, tail.dropFirst()).contains { $0 == 0xFF && $1 == 0xD9 }
+        }
+        if type.conforms(to: .png) {
+            // The IEND chunk: an empty body and a fixed CRC.
+            return data.suffix(12).elementsEqual([0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82])
+        }
+        if type.conforms(to: .gif) {
+            return data.last == 0x3B
+        }
+        if type.conforms(to: .webP) {
+            // The RIFF header counts the bytes that follow its first eight.
+            guard data.count >= 8 else { return false }
+            let size = data.dropFirst(4).prefix(4).reversed().reduce(0) { $0 << 8 | Int($1) }
+            return data.count >= size + 8
+        }
+        return true
     }
 
     /// Reads the pixel size from the header alone. An image with no readable size is refused too:
-    /// the full decode that follows would find out the size the expensive way.
+    /// drawing it would find out the size the expensive way.
     nonisolated static func hasAcceptableSize(_ source: CGImageSource) -> Bool {
         guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
