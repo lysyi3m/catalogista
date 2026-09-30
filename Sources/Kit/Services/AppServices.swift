@@ -105,6 +105,9 @@ public final class AppServices {
         for file in files {
             try FileManager.default.trashItem(at: file, resultingItemURL: nil)
         }
+        // The new store is empty, so the collection is not fresh however recent the last sync
+        // was. Without this the launch sync is skipped and the app shows nothing for hours.
+        UserDefaults.standard.removeObject(forKey: SyncController.lastSyncedKey)
     }
 
     nonisolated public static func makeModelContainer(inMemory: Bool = false) throws -> ModelContainer {
@@ -118,7 +121,12 @@ public final class AppServices {
     @discardableResult
     func signIn(token: String) async throws -> Identity {
         let candidate = Self.makeClient(token: token, configuration: sessionConfiguration)
+        let generation = accountGeneration
         let identity = try await candidate.identity()
+        // Disconnected while the check was out: that disconnect is the later request, and it wins.
+        // Checked and applied on the main actor with no suspension between, so no sign-out can
+        // land in between.
+        guard accountGeneration == generation else { throw CancellationError() }
         try tokenStore.save(token)
         client = candidate
         maskedToken = Self.mask(token)

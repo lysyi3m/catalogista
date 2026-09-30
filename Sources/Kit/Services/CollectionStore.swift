@@ -52,8 +52,8 @@ actor CollectionStore {
 
     /// Inserts new copies and refreshes existing ones in place.
     ///
-    /// During a sync, a copy removed on this device since the sync began is skipped: the page
-    /// that still lists it was fetched before the removal.
+    /// During a sync, a copy removed on this device that the sync could still undo is skipped: the
+    /// page that still lists it may predate the removal. See `writes`.
     func upsert(_ items: [CollectionItem]) throws {
         // Only this page's copies: fetching the whole collection for every page made a sync
         // quadratic in the collection's size.
@@ -65,7 +65,7 @@ actor CollectionStore {
             try modelContext.fetch(descriptor).map { ($0.instanceID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let removed = writesDuringSync?.removed ?? []
+        let removed = respectedWrites(.removed)
         for item in items where !removed.contains(item.instanceID) {
             if let cached = existing[item.instanceID] {
                 cached.update(from: item)
@@ -77,10 +77,10 @@ actor CollectionStore {
     }
 
     /// Drops every cached copy whose `instanceID` is absent from `instanceIDs`, except those added
-    /// on this device since the sync began: the pages were fetched before them.
+    /// on this device that the sync could still undo: its pages may predate them. See `writes`.
     @discardableResult
     func pruneItems(keeping instanceIDs: Set<Int>) throws -> Int {
-        let kept = instanceIDs.union(writesDuringSync?.added ?? [])
+        let kept = instanceIDs.union(respectedWrites(.added))
         let stale = try modelContext.fetch(FetchDescriptor<CachedCollectionItem>())
             .filter { !kept.contains($0.instanceID) }
         for item in stale { modelContext.delete(item) }
@@ -92,8 +92,7 @@ actor CollectionStore {
         guard let item = try cachedItem(instanceID: instanceID) else { return }
         modelContext.delete(item)
         try saveOrRollback()
-        writesDuringSync?.added.remove(instanceID)
-        writesDuringSync?.removed.insert(instanceID)
+        writes[instanceID] = WriteMark(kind: .removed)
     }
 
     // MARK: - Optimistic writes
@@ -102,7 +101,7 @@ actor CollectionStore {
     func insert(_ pending: PendingAddition) throws {
         modelContext.insert(CachedCollectionItem(from: pending))
         try saveOrRollback()
-        writesDuringSync?.added.insert(pending.instanceID)
+        writes[pending.instanceID] = WriteMark(kind: .added)
     }
 
     /// Puts a removed copy back, after Discogs rejected the delete.
@@ -110,7 +109,7 @@ actor CollectionStore {
         guard try cachedItem(instanceID: snapshot.instanceID) == nil else { return }
         modelContext.insert(CachedCollectionItem(from: snapshot))
         try saveOrRollback()
-        writesDuringSync?.removed.remove(snapshot.instanceID)
+        writes[snapshot.instanceID] = nil
     }
 
     /// Swaps a provisional id for the one Discogs assigned.
@@ -118,7 +117,8 @@ actor CollectionStore {
         guard let item = try cachedItem(instanceID: provisional) else { return }
         item.instanceID = confirmed
         try saveOrRollback()
-        writesDuringSync?.added.insert(confirmed)
+        writes[provisional] = nil
+        writes[confirmed] = WriteMark(kind: .added)
     }
 
     /// Replaces the search-derived fields with the release's own, once it has been fetched.
@@ -220,20 +220,49 @@ actor CollectionStore {
 
     // MARK: - Writes during a sync
 
-    /// Copies added or removed on this device while a sync runs; nil outside one.
+    /// Copies added or removed on this device, for as long as a sync could still undo them.
     ///
-    /// A sync reads Discogs over many requests, so its pages can predate a write made meanwhile:
-    /// pruning would delete a copy just added, and a later page would put back a copy just
-    /// removed. Kept on this actor, so a write and the sync's use of it cannot interleave. Recorded
-    /// only once the write is saved.
-    private var writesDuringSync: (added: Set<Int>, removed: Set<Int>)?
+    /// A sync reads Discogs over many requests, so its pages can predate a write: pruning would
+    /// delete a copy just added, and a page would put back a copy just removed. That holds for a
+    /// write already in flight when the sync starts as much as for one made during it. So a write
+    /// is marked from the moment it touches the cache, stays marked while in flight, and after
+    /// it settles is still respected by any sync that began before it settled. A sync that begins
+    /// later fetched its pages after the write landed, and drops the mark. Kept on this actor, so
+    /// a write and a sync's use of the marks cannot interleave.
+    private var writes: [Int: WriteMark] = [:]
+    /// Counts sync starts, to tell which syncs began before a write settled.
+    private var syncEpoch = 0
+    /// The epoch of the sync in progress, if any.
+    private var runningSync: Int?
+
+    private struct WriteMark {
+        enum Kind { case added, removed }
+        let kind: Kind
+        /// The epoch when the write finished; nil while it is in flight.
+        var settledAt: Int?
+    }
+
+    private func respectedWrites(_ kind: WriteMark.Kind) -> Set<Int> {
+        guard let runningSync else { return [] }
+        return Set(writes.filter { $0.value.kind == kind && ($0.value.settledAt ?? .max) >= runningSync }.keys)
+    }
+
+    /// Ends the in-flight period of the writes to these copies. Settling twice is harmless.
+    func settleWrites(_ instanceIDs: Set<Int>) {
+        for id in instanceIDs where writes[id]?.settledAt == nil {
+            writes[id]?.settledAt = syncEpoch
+        }
+    }
 
     func beginSync() {
-        writesDuringSync = ([], [])
+        syncEpoch += 1
+        runningSync = syncEpoch
+        // Settled before this sync started: its pages reflect them.
+        writes = writes.filter { ($0.value.settledAt ?? .max) >= syncEpoch }
     }
 
     func endSync() {
-        writesDuringSync = nil
+        runningSync = nil
     }
 
     // MARK: - Maintenance

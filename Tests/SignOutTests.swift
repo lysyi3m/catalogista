@@ -73,6 +73,43 @@ struct SignOutTests {
         return (services, tokenStore)
     }
 
+    /// Answers the identity check after a delay, so a disconnect can land while it is out.
+    final class SlowIdentityProtocol: URLProtocol, @unchecked Sendable {
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+        override func startLoading() {
+            Thread.sleep(forTimeInterval: 0.3)
+            let body = #"{"id":2,"username":"late","resource_url":"https://api.discogs.com"}"#
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        override func stopLoading() {}
+    }
+
+    @Test("A sign-in whose check returns after a disconnect does not sign back in")
+    func lateSignInLosesToDisconnect() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SlowIdentityProtocol.self]
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
+        defer { try? tokenStore.delete() }
+        let services = AppServices(
+            modelContainer: try AppServices.makeModelContainer(inMemory: true),
+            tokenStore: tokenStore,
+            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
+            sessionConfiguration: configuration
+        )
+
+        let signIn = Task { try await services.signIn(token: "test-token") }
+        try await Task.sleep(for: .milliseconds(100))
+        try await services.signOut()
+        _ = await signIn.result
+
+        #expect(services.hasToken == false, "the disconnect came later and must win")
+        #expect(try tokenStore.read() == nil, "nothing may be saved for the abandoned sign-in")
+    }
+
     @Test("Signing out does not wait for the cover backlog")
     func signOutDoesNotDrainCovers() async throws {
         let (services, tokenStore) = try makeServices()

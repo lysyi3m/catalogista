@@ -81,6 +81,45 @@ struct CollectionStoreTests {
         #expect(try await store.item(instanceID: 2) == nil, "the removal must stick")
     }
 
+    @Test("An add already in flight when a sync starts survives it, and a later sync settles it")
+    func addInFlightBeforeSync() async throws {
+        let store = try makeStore()
+        try await store.upsert([try makeItem(instanceID: 1)])
+
+        // Inserted before the sync starts; Discogs has not confirmed it yet.
+        try await store.insert(try makePending(instanceID: -7))
+        await store.beginSync()
+        #expect(try await store.pruneItems(keeping: [1]) == 0, "the pending add must not be pruned")
+        await store.endSync()
+        try await store.reassignInstanceID(from: -7, to: 9)
+        #expect(try await store.item(instanceID: 9) != nil, "the confirmed id must land on the row")
+
+        // Settled, then a sync that began afterwards and does not list it: Discogs is canonical.
+        await store.settleWrites([-7, 9])
+        await store.beginSync()
+        #expect(try await store.pruneItems(keeping: [1]) == 1)
+        await store.endSync()
+    }
+
+    @Test("A removal already in flight when a sync starts is not put back by its pages")
+    func removalInFlightBeforeSync() async throws {
+        let store = try makeStore()
+        try await store.upsert([try makeItem(instanceID: 1), try makeItem(instanceID: 2)])
+
+        try await store.deleteItem(instanceID: 2)
+        await store.beginSync()
+        try await store.upsert([try makeItem(instanceID: 1), try makeItem(instanceID: 2)])
+        await store.endSync()
+        #expect(try await store.item(instanceID: 2) == nil, "the pending removal must stick")
+
+        // Settled, then a later sync that still lists it: Discogs kept it, so it comes back.
+        await store.settleWrites([2])
+        await store.beginSync()
+        try await store.upsert([try makeItem(instanceID: 1), try makeItem(instanceID: 2)])
+        await store.endSync()
+        #expect(try await store.item(instanceID: 2) != nil)
+    }
+
     @Test("Outside a sync, writes leave no trace in later reconciliation")
     func writesOutsideSyncAreNotRecorded() async throws {
         let store = try makeStore()
