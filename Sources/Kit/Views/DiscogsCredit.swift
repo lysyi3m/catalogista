@@ -49,6 +49,9 @@ enum DiscogsNotice {
 struct DiscogsCredit: View {
     let destination: URL
     var slack: CGFloat = 0
+    /// Space a list keeps after its last row. The credit moves down by it within its own padding,
+    /// so it ends as far from the bottom edge in a list as anywhere else. See `ListCreditSpacing`.
+    var listTrailing: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,7 +77,53 @@ struct DiscogsCredit: View {
         }
         .font(.caption)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        // Moved, not trimmed: the row keeps its height, so the list's layout does not change and
+        // cannot feed back into the measurement.
+        .padding(.top, 24 + listTrailing)
+        .padding(.bottom, 24 - listTrailing)
+    }
+}
+
+/// Measures the space a `List` keeps after its last row.
+///
+/// The macOS list keeps about 14 pt there whatever its content margins say, so a credit in its
+/// last row ends higher than one at the end of a grid or a page, and jumps when switching between
+/// them. Measured rather than assumed, since the list style decides it: the content's bottom edge
+/// minus the credit row's, both in the scroll view's space. Taken only while the list is at rest,
+/// because the two readings arrive separately and would disagree mid-scroll.
+@MainActor
+@Observable
+final class ListCreditSpacing {
+    private(set) var trailing: CGFloat = 0
+    @ObservationIgnored private var rowBottom: CGFloat?
+    @ObservationIgnored private var contentBottom: CGFloat?
+    @ObservationIgnored private var isScrolling = false
+
+    func rowMoved(bottom: CGFloat) {
+        rowBottom = bottom
+        settle()
+    }
+
+    func contentMoved(bottom: CGFloat) {
+        contentBottom = bottom
+        settle()
+    }
+
+    func scrollingChanged(_ scrolling: Bool) {
+        isScrolling = scrolling
+        settle()
+    }
+
+    /// Applying a value moves the credit within its row and leaves every size alone, so the reading
+    /// stays put. While rows first lay out the two readings drift apart and give passing values
+    /// (−1460, 95, 175 pt measured), so only readings within the credit's own padding count, and
+    /// a new value is applied after the layout pass: changing layout from within a layout pass
+    /// made AppKit stop the app.
+    private func settle() {
+        guard !isScrolling, let rowBottom, let contentBottom else { return }
+        let measured = (contentBottom - rowBottom).rounded()
+        guard (0...24).contains(measured), measured != trailing else { return }
+        Task { @MainActor in self.trailing = measured }
     }
 }
 
@@ -111,11 +160,28 @@ extension View {
     }
 
     /// Places a credit as the last row of a list. A section footer adds insets of its own, which
-    /// would leave more space below the credit than above it.
-    func creditRow() -> some View {
+    /// would leave more space below the credit than above it. `spacing` measures the row; pass the
+    /// same object to the list's `listCreditSpacing(_:)` and its `trailing` to the credit.
+    func creditRow(_ spacing: ListCreditSpacing? = nil) -> some View {
         listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).maxY } action: {
+                spacing?.rowMoved(bottom: $0)
+            }
+    }
+
+    /// The list's half of `ListCreditSpacing`: where its content ends, and whether it is scrolling.
+    func listCreditSpacing(_ spacing: ListCreditSpacing) -> some View {
+        onScrollGeometryChange(for: CGFloat.self) { geometry in
+            // The content's bottom edge in the same space as the row's frame.
+            geometry.contentSize.height - geometry.contentOffset.y
+        } action: { _, bottom in
+            spacing.contentMoved(bottom: bottom)
+        }
+        .onScrollPhaseChange { _, phase in
+            spacing.scrollingChanged(phase != .idle)
+        }
     }
 }
 

@@ -23,6 +23,7 @@ struct AddRecordView: View {
     /// Room under short results, and the second step's visible height. Both keep the credit on
     /// the bottom edge. See `creditSlack(_:)` and `creditViewport(_:)`.
     @State private var resultsCreditSlack: CGFloat = 0
+    @State private var resultsCreditSpacing = ListCreditSpacing()
     @State private var confirmationViewportHeight: CGFloat = 0
     @State private var search: ReleaseSearchController?
     /// Shown when there is no client to search with, which is not a search failure.
@@ -95,6 +96,7 @@ struct AddRecordView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .bottomBar) { moreResults }
             }
             .navigationDestination(item: $confirming) { result in
                 confirmation(for: result)
@@ -146,12 +148,35 @@ struct AddRecordView: View {
     #if os(macOS)
     private var footer: some View {
         HStack {
+            moreResults
             Spacer()
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
         .padding(12)
     }
+    #endif
+
+    /// How many of the matches are shown, and the way to the next page. In the sheet's bar rather
+    /// than the list: as rows under the results, the macOS list drew a separator between them and
+    /// the credit whatever the rows asked for.
+    @ViewBuilder
+    private var moreResults: some View {
+        if case .loaded(let total) = state, total > results.count {
+            HStack(spacing: 10) {
+                Text("Showing \(results.count) of \(total)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                if search?.isLoadingMore == true {
+                    ProgressView().controlSize(.small)
+                } else if search?.hasMore == true {
+                    Button("Show More") { search?.loadMore() }
+                }
+            }
+        }
+    }
+    #if os(macOS)
 
     /// Escape steps back to the results rather than closing the sheet, the way Back would.
     private func confirmationFooter(for result: SearchResult) -> some View {
@@ -311,7 +336,7 @@ struct AddRecordView: View {
                 .overlay(alignment: .bottom) {
                     if total > 0 { Text("No matches shown").font(.footnote) }
                 }
-        case .loaded(let total):
+        case .loaded:
             List {
                 Section {
                     ForEach(results) { result in
@@ -323,34 +348,18 @@ struct AddRecordView: View {
                         .rowHoverHighlight(id: result.id, hovered: $hoveredResultID)
                     }
                 }
-                VStack(spacing: 8) {
-                    if total > results.count {
-                        Text("Showing \(results.count) of \(total) matches.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if search?.hasMore == true {
-                            if search?.isLoadingMore == true {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Button("Show More") { search?.loadMore() }
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, total > results.count ? 24 : 0)
-                .creditRow()
                 // For what was searched, not what the field says now.
                 DiscogsCredit(
                     destination: DiscogsNotice.searchURL(query: search?.submittedQuery ?? query),
-                    slack: resultsCreditSlack
+                    slack: resultsCreditSlack,
+                    listTrailing: resultsCreditSpacing.trailing
                 )
-                .creditRow()
+                .creditRow(resultsCreditSpacing)
             }
             // The list's own trailing margin would add to the space the credit brings.
             .contentMargins(.bottom, 0, for: .scrollContent)
             .creditSlack($resultsCreditSlack)
+            .listCreditSpacing(resultsCreditSpacing)
             #if os(iOS)
             // The default grouped style insets the results into a card, which under the sheet's
             // own divider reads as a band of dead space. Search results belong flush to the edge.
