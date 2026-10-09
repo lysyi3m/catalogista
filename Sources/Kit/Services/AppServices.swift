@@ -26,6 +26,12 @@ public final class AppServices {
     /// each write, which sign-out also runs on.
     private(set) var accountGeneration = 0
 
+    /// Bumped whenever a copy changes folder on this device, so views that count copies per folder
+    /// know to count again. A sync is the other way a copy changes folder, and has its own signal.
+    private(set) var folderRevision = 0
+
+    func noteFolderChange() { folderRevision += 1 }
+
     /// Non-nil once a token is available. First-run setup sets it; until then the app is in its
     /// no-token state and browses whatever the cache already holds.
     private(set) var client: DiscogsClient?

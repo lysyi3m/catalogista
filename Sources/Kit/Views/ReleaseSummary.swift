@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// Shared by the record page and the add confirmation, so a release reads the same before and
 /// after it is added.
-struct ReleaseHeader: View {
+struct ReleaseHeader<Actions: View>: View {
     let releaseID: Int
     let cover: (url: String?, kind: ImageCache.Kind)
     let title: String
@@ -12,6 +12,26 @@ struct ReleaseHeader: View {
     /// Year and format, the two things that distinguish one edition from another at a glance.
     let subtitle: String
     let tags: [String]
+    /// Buttons for the record, under the title block. See `RecordActionRow`.
+    let actions: Actions
+
+    init(
+        releaseID: Int,
+        cover: (url: String?, kind: ImageCache.Kind),
+        title: String,
+        artist: String,
+        subtitle: String,
+        tags: [String],
+        @ViewBuilder actions: () -> Actions
+    ) {
+        self.releaseID = releaseID
+        self.cover = cover
+        self.title = title
+        self.artist = artist
+        self.subtitle = subtitle
+        self.tags = tags
+        self.actions = actions()
+    }
 
     var body: some View {
         #if os(iOS)
@@ -22,13 +42,23 @@ struct ReleaseHeader: View {
             coverImage(edge: 240)
                 .frame(maxWidth: .infinity, alignment: .center)
             titleBlock
+            actions
         }
         #else
         HStack(alignment: .top, spacing: 24) {
             coverImage(edge: 200)
-            titleBlock
+            // The actions sit level with the bottom of the cover, as in Music; a long title block
+            // pushes them lower rather than overlapping. The row takes its height from the taller
+            // of the two, and the column fills it, so the spacer has a height to fill.
+            VStack(alignment: .leading, spacing: 0) {
+                titleBlock
+                Spacer(minLength: 16)
+                actions
+            }
+            .frame(maxHeight: .infinity, alignment: .topLeading)
             Spacer(minLength: 0)
         }
+        .fixedSize(horizontal: false, vertical: true)
         #endif
     }
 
@@ -60,6 +90,22 @@ struct ReleaseHeader: View {
                     .padding(.top, 4)
             }
         }
+    }
+}
+
+extension ReleaseHeader where Actions == EmptyView {
+    init(
+        releaseID: Int,
+        cover: (url: String?, kind: ImageCache.Kind),
+        title: String,
+        artist: String,
+        subtitle: String,
+        tags: [String]
+    ) {
+        self.init(
+            releaseID: releaseID, cover: cover, title: title, artist: artist,
+            subtitle: subtitle, tags: tags, actions: { EmptyView() }
+        )
     }
 }
 

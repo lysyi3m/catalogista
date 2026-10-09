@@ -20,6 +20,9 @@ struct CollectionView: View {
     private let searchQuery: String
     private let onSelect: (CachedCollectionItem) -> Void
     private let onRequestRemove: (CachedCollectionItem) -> Void
+    /// Where a copy can be moved, for the context menu. See `CollectionFolders.destinations`.
+    private let destinations: [FolderSnapshot]
+    private let onMove: (CachedCollectionItem, Int) -> Void
 
     @State private var hoveredID: PersistentIdentifier?
     /// Room under a short list, and the grid's visible height. Both keep the credit on the bottom
@@ -36,7 +39,9 @@ struct CollectionView: View {
         direction: SortDirection,
         itemWidth: CGFloat,
         searchQuery: String,
+        destinations: [FolderSnapshot],
         onSelect: @escaping (CachedCollectionItem) -> Void,
+        onMove: @escaping (CachedCollectionItem, Int) -> Void,
         onRequestRemove: @escaping (CachedCollectionItem) -> Void
     ) {
         var descriptor = FetchDescriptor<CachedCollectionItem>()
@@ -52,6 +57,19 @@ struct CollectionView: View {
         self.itemWidth = itemWidth
         self.onSelect = onSelect
         self.onRequestRemove = onRequestRemove
+        self.destinations = destinations
+        self.onMove = onMove
+    }
+
+    private func contextMenu(for item: CachedCollectionItem) -> some View {
+        RecordContextMenu(
+            folderID: item.folderID,
+            folders: destinations,
+            discogsURL: DiscogsNotice.releaseURL(id: item.releaseID),
+            onOpen: { onSelect(item) },
+            onMove: { onMove(item, $0) },
+            onRequestRemove: { onRequestRemove(item) }
+        )
     }
 
     var body: some View {
@@ -123,13 +141,7 @@ struct CollectionView: View {
                             )
                         }
                             .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Open") { onSelect(item) }
-                                Divider()
-                                Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
-                                    onRequestRemove(item)
-                                }
-                            }
+                            .contextMenu { contextMenu(for: item) }
                             #if os(iOS)
                             .swipeActions(edge: .trailing) {
                                 Button("Remove", systemImage: "trash", role: .destructive) {
@@ -180,13 +192,7 @@ struct CollectionView: View {
                         // A dense grid has no caption, and the cover says nothing to VoiceOver.
                         .accessibilityLabel("\(item.title), \(item.artistName)")
                         // Long press on iOS, right click on macOS.
-                        .contextMenu {
-                            Button("Open") { onSelect(item) }
-                            Divider()
-                            Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
-                                onRequestRemove(item)
-                            }
-                        }
+                        .contextMenu { contextMenu(for: item) }
                     }
                 }
                 // No bottom padding: the credit below brings its own space.

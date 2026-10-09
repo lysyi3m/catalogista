@@ -75,8 +75,9 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
 ## Terminology
 
 - **Collection** — every record, and the top entry of the sidebar. Discogs' folder 0, "All".
-- **Folder** — a Discogs collection folder. Read-only here: created, renamed and deleted on
-  discogs.com. Uncategorized is pinned first; the rest sort by name.
+- **Folder** — a Discogs collection folder. A copy is in exactly one; the app moves a copy
+  between folders, and folders themselves are created, renamed and deleted on discogs.com.
+  Uncategorized is pinned first; the rest sort by name.
 - **Record** — an item in the collection. Counts, empty states, `Add Record`.
 - **Release** — the edition on Discogs. Search and the add confirmation.
 - **Copy** — the instance the user owns. Removal flows.

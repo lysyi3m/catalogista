@@ -36,9 +36,9 @@ enum CollectionFolders {
         folderIDs.reduce(into: [:]) { $0[$1, default: 0] += 1 }
     }
 
-    /// The folders an add can target. Uncategorized is always among them: it exists on every
-    /// Discogs account, even before a first sync has cached it.
-    static func addTargets(_ folders: [FolderSnapshot]) -> [FolderSnapshot] {
+    /// The folders a copy can be filed in, by an add or a move. Uncategorized is always among
+    /// them: it exists on every Discogs account, even before a first sync has cached it.
+    static func destinations(_ folders: [FolderSnapshot]) -> [FolderSnapshot] {
         let listed = ordered(folders)
         guard !listed.contains(where: { $0.id == DiscogsFolder.uncategorized }) else { return listed }
         return [FolderSnapshot(id: DiscogsFolder.uncategorized, name: "Uncategorized", count: 0)] + listed

@@ -79,10 +79,11 @@ public struct ContentView: View {
     @State private var folderCounts: [Int: Int] = [:]
     @State private var matchCount = 0
 
-    /// What the counts depend on. A copy changes folder only in a sync, so the sync time stands in
-    /// for moves; adds and removes change the count.
+    /// What the counts depend on. Adds and removes change the count; a move on this device bumps
+    /// the folder revision, and the sync time stands in for moves made elsewhere.
     private struct CountsKey: Hashable {
         let itemCount: Int
+        let folderRevision: Int
         let lastSyncedAt: Date?
         let folderID: Int
         let query: String
@@ -91,6 +92,7 @@ public struct ContentView: View {
     private var countsKey: CountsKey {
         CountsKey(
             itemCount: allItems.count,
+            folderRevision: services.folderRevision,
             lastSyncedAt: syncController.lastSyncedAt,
             folderID: folderID,
             query: searchQuery
@@ -305,7 +307,11 @@ public struct ContentView: View {
                 direction: direction,
                 itemWidth: itemWidth,
                 searchQuery: searchQuery,
+                destinations: CollectionFolders.destinations(folders),
                 onSelect: { selection = $0 },
+                onMove: { item, folderID in
+                    Task { await editor?.move(instanceID: item.instanceID, toFolderID: folderID) }
+                },
                 onRequestRemove: { pendingRemoval = $0 }
             )
             // A fresh view per folder, so a new folder opens at the top rather than at the

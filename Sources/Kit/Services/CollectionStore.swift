@@ -52,8 +52,8 @@ actor CollectionStore {
 
     /// Inserts new copies and refreshes existing ones in place.
     ///
-    /// During a sync, a copy removed on this device that the sync could still undo is skipped: the
-    /// page that still lists it may predate the removal. See `writes`.
+    /// During a sync, a copy removed or moved on this device that the sync could still undo is
+    /// skipped: the page that lists it may predate the write. See `writes`.
     func upsert(_ items: [CollectionItem]) throws {
         // Only this page's copies: fetching the whole collection for every page made a sync
         // quadratic in the collection's size.
@@ -65,8 +65,8 @@ actor CollectionStore {
             try modelContext.fetch(descriptor).map { ($0.instanceID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let removed = respectedWrites(.removed)
-        for item in items where !removed.contains(item.instanceID) {
+        let skipped = respectedWrites(.removed).union(respectedWrites(.moved))
+        for item in items where !skipped.contains(item.instanceID) {
             if let cached = existing[item.instanceID] {
                 cached.update(from: item)
             } else {
@@ -110,6 +110,18 @@ actor CollectionStore {
         modelContext.insert(CachedCollectionItem(from: snapshot))
         try saveOrRollback()
         writes[snapshot.instanceID] = nil
+    }
+
+    /// Files a copy under another folder, before Discogs has confirmed it, and returns the folder it
+    /// was in; nil when the cache has no such copy. Also how a rejected move is put back.
+    @discardableResult
+    func moveItem(instanceID: Int, toFolderID folderID: Int) throws -> Int? {
+        guard let item = try cachedItem(instanceID: instanceID) else { return nil }
+        let previous = item.folderID
+        item.folderID = folderID
+        try saveOrRollback()
+        writes[instanceID] = WriteMark(kind: .moved)
+        return previous
     }
 
     /// Swaps a provisional id for the one Discogs assigned.
@@ -220,15 +232,16 @@ actor CollectionStore {
 
     // MARK: - Writes during a sync
 
-    /// Copies added or removed on this device, for as long as a sync could still undo them.
+    /// Copies added, removed or moved on this device, for as long as a sync could still undo them.
     ///
     /// A sync reads Discogs over many requests, so its pages can predate a write: pruning would
-    /// delete a copy just added, and a page would put back a copy just removed. That holds for a
-    /// write already in flight when the sync starts as much as for one made during it. So a write
-    /// is marked from the moment it touches the cache, stays marked while in flight, and after
-    /// it settles is still respected by any sync that began before it settled. A sync that begins
-    /// later fetched its pages after the write landed, and drops the mark. Kept on this actor, so
-    /// a write and a sync's use of the marks cannot interleave.
+    /// delete a copy just added, and a page would put back a copy just removed or file a moved
+    /// copy back in its old folder. That holds for a write already in flight when the sync starts
+    /// as much as for one made during it. So a write is marked from the moment it touches the
+    /// cache, stays marked while in flight, and after it settles is still respected by any sync
+    /// that began before it settled. A sync that begins later fetched its pages after the write
+    /// landed, and drops the mark. Kept on this actor, so a write and a sync's use of the marks
+    /// cannot interleave.
     private var writes: [Int: WriteMark] = [:]
     /// Counts sync starts, to tell which syncs began before a write settled.
     private var syncEpoch = 0
@@ -236,7 +249,7 @@ actor CollectionStore {
     private var runningSync: Int?
 
     private struct WriteMark {
-        enum Kind { case added, removed }
+        enum Kind { case added, removed, moved }
         let kind: Kind
         /// The epoch when the write finished; nil while it is in flight.
         var settledAt: Int?

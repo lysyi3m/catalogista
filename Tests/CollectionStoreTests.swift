@@ -120,6 +120,26 @@ struct CollectionStoreTests {
         #expect(try await store.item(instanceID: 2) != nil)
     }
 
+    @Test("A move already in flight when a sync starts is not filed back by its pages")
+    func moveInFlightBeforeSync() async throws {
+        let store = try makeStore()
+        try await store.upsert([try makeItem(instanceID: 1)])
+
+        #expect(try await store.moveItem(instanceID: 1, toFolderID: 5) == 1, "returns the folder it left")
+        await store.beginSync()
+        // The page predates the move and still lists the copy in folder 1.
+        try await store.upsert([try makeItem(instanceID: 1)])
+        await store.endSync()
+        #expect(try await store.item(instanceID: 1)?.folderID == 5, "the pending move must stick")
+
+        // Settled, then a later sync that still says folder 1: Discogs did not take the move.
+        await store.settleWrites([1])
+        await store.beginSync()
+        try await store.upsert([try makeItem(instanceID: 1)])
+        await store.endSync()
+        #expect(try await store.item(instanceID: 1)?.folderID == 1)
+    }
+
     @Test("Outside a sync, writes leave no trace in later reconciliation")
     func writesOutsideSyncAreNotRecorded() async throws {
         let store = try makeStore()

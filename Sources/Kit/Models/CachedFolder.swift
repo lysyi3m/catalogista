@@ -2,9 +2,9 @@ import DiscogsKit
 import Foundation
 import SwiftData
 
-/// A Discogs collection folder, refreshed with every sync. Read-only in the app: folders are
-/// created, renamed and deleted on discogs.com. `count` is Discogs' own; the sidebar counts the
-/// cached copies instead (`CollectionFolders.counts`).
+/// A Discogs collection folder, refreshed with every sync. The app moves copies between folders;
+/// folders themselves are created, renamed and deleted on discogs.com. `count` is Discogs' own;
+/// the sidebar counts the cached copies instead (`CollectionFolders.counts`).
 @Model
 final class CachedFolder {
     @Attribute(.unique) var id: Int

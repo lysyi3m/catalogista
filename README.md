@@ -29,11 +29,12 @@
 - **Search** the collection or the open folder as you type, offline.
 - **Record detail** — full-size cover, edition details, tracklist, and a link out to Discogs.
 - **Add** — search Discogs, pick the exact release, pick its folder.
-- **Remove** — from the detail screen, or a long press on any cover (right click on Mac).
+- **Move** — file a copy in another folder from its page, or a long press on any cover (right click on Mac).
+- **Remove** — from the same places, behind a confirmation.
 - **Offline** — the whole collection stays browsable from the local cache.
 
-Adds and removes apply to the local cache immediately and roll back if Discogs
-rejects them.
+Adds, moves and removes apply to the local cache immediately and roll back if
+Discogs rejects them.
 
 ## Requirements
 
@@ -107,7 +108,7 @@ no token.
 ## Scope
 
 v1 is the flows above. Deliberately out of scope for now: barcode scanning,
-a zoomable infinite canvas, folder edits (create, rename, delete, move a copy),
+a zoomable infinite canvas, folder edits (create, rename, delete),
 an offline edit queue, wantlist, marketplace prices, and stats.
 
 ## Privacy

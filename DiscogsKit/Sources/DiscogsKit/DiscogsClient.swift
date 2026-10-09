@@ -195,6 +195,26 @@ public struct DiscogsClient: Sendable {
         )
     }
 
+    /// `POST …/collection/folders/{folder_id}/releases/{release_id}/instances/{instance_id}`
+    ///
+    /// Moves one copy to `toFolderID`. A copy is in exactly one folder, so this replaces its folder
+    /// rather than adding another. The path names the folder the copy is in now.
+    public func moveInstance(
+        user: String,
+        fromFolderID: Int,
+        releaseID: Int,
+        instanceID: Int,
+        toFolderID: Int
+    ) async throws {
+        try await performIgnoringResponse(
+            method: "POST",
+            path: "/users/\(escape(user))/collection/folders/\(fromFolderID)/releases/\(releaseID)/instances/\(instanceID)",
+            body: ["folder_id": toFolderID],
+            // Moving a copy to the folder it is already in changes nothing.
+            isIdempotent: true
+        )
+    }
+
     // MARK: - Request plumbing
 
     private func get<Response: Decodable>(
@@ -224,15 +244,21 @@ public struct DiscogsClient: Sendable {
         method: String,
         path: String,
         query: [URLQueryItem] = [],
+        body: [String: Int]? = nil,
         isIdempotent: Bool = true
     ) async throws {
         _ = try await send(
-            try makeRequest(method: method, path: path, query: query),
+            try makeRequest(method: method, path: path, query: query, body: body),
             isIdempotent: isIdempotent
         )
     }
 
-    private func makeRequest(method: String, path: String, query: [URLQueryItem]) throws -> URLRequest {
+    private func makeRequest(
+        method: String,
+        path: String,
+        query: [URLQueryItem],
+        body: [String: Int]? = nil
+    ) throws -> URLRequest {
         guard var components = URLComponents(
             url: configuration.baseURL.appendingPathComponent(path),
             resolvingAgainstBaseURL: false
@@ -247,6 +273,10 @@ public struct DiscogsClient: Sendable {
         request.setValue("Discogs token=\(token)", forHTTPHeaderField: "Authorization")
         request.setValue(configuration.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(body)
+        }
         return request
     }
 

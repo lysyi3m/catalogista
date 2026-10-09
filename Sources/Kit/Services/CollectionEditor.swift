@@ -197,6 +197,88 @@ final class CollectionEditor {
         }
     }
 
+    /// Moves a copy to another folder, optimistically.
+    ///
+    /// The copy shows in its new folder at once and goes back if Discogs rejects the move. A move
+    /// is idempotent, so unlike an add it is always safe to offer again.
+    @discardableResult
+    func move(instanceID: Int, toFolderID folderID: Int) async -> Bool {
+        guard !isWorking, let client = services.client else { return false }
+        isWorking = true
+        failure = nil
+        defer { isWorking = false }
+        let generation = services.accountGeneration
+
+        let snapshot: CollectionItemSnapshot?
+        do {
+            snapshot = try await services.store.item(instanceID: instanceID)
+        } catch {
+            failure = Failure(title: "Unable to Move Copy", message: error.localizedDescription, retry: nil)
+            return false
+        }
+        guard let snapshot else { return false }
+        guard snapshot.folderID != folderID else { return true }
+
+        func failed(_ error: any Error, title: String) {
+            failure = Failure(
+                title: title,
+                message: error.localizedDescription,
+                retry: { [weak self] in _ = await self?.move(instanceID: instanceID, toFolderID: folderID) }
+            )
+        }
+
+        do {
+            try await services.store.moveItem(instanceID: instanceID, toFolderID: folderID)
+        } catch {
+            failed(error, title: "Unable to Move “\(snapshot.title)”")
+            return false
+        }
+        services.noteFolderChange()
+        // Protected from syncs until the move ends. See `CollectionStore.writes`.
+        defer { Task { [store = services.store] in await store.settleWrites([instanceID]) } }
+
+        do {
+            let username = try await services.username()
+            try await client.moveInstance(
+                user: username,
+                fromFolderID: snapshot.folderID,
+                releaseID: snapshot.releaseID,
+                instanceID: instanceID,
+                toFolderID: folderID
+            )
+            return true
+        } catch {
+            guard !hasDisconnected(since: generation) else { return false }
+            let discogsError = error as? DiscogsError
+            // Not found means this device's picture is out of date: the copy is gone, or no longer
+            // in the folder the request named. Any other unconfirmed outcome may have been
+            // applied. Either way only Discogs can say where the copy is now.
+            if discogsError?.didNotReachDiscogs == true, discogsError?.isNotFound == false {
+                try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
+                services.noteFolderChange()
+                failed(error, title: "Unable to Move “\(snapshot.title)”")
+                return false
+            }
+            // Settled first: the sync below decides the folder, and must be free to change it.
+            await services.store.settleWrites([instanceID])
+            guard await services.syncController.syncAfterWrite() else {
+                failure = Failure(
+                    title: "Unable to Confirm Move",
+                    message: "“\(snapshot.title)” may not have moved. Sync your collection to confirm.",
+                    retry: { [weak self] in _ = await self?.move(instanceID: instanceID, toFolderID: folderID) }
+                )
+                return false
+            }
+            guard let now = try? await services.store.item(instanceID: instanceID) else {
+                // Removed on Discogs in the meantime; there is nothing left to move.
+                return false
+            }
+            if now.folderID == folderID { return true }
+            failed(error, title: "Unable to Move “\(snapshot.title)”")
+            return false
+        }
+    }
+
     /// Whether the account disconnected after `generation` was read. A write that finishes after
     /// that must not touch the cache, which sign-out has cleared.
     private func hasDisconnected(since generation: Int) -> Bool {
