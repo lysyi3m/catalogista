@@ -7,6 +7,8 @@ final class CountingProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var counts: [String: Int] = [:]
     nonisolated(unsafe) private static var status = 200
     nonisolated(unsafe) private static var body = Data()
+    nonisolated(unsafe) private static var lastPath: String?
+    nonisolated(unsafe) private static var lastBody: Data?
     private static let lock = NSLock()
 
     static func configure(status: Int, body: Data) {
@@ -21,13 +23,21 @@ final class CountingProtocol: URLProtocol, @unchecked Sendable {
         lock.withLock { counts[method] ?? 0 }
     }
 
+    /// The path and body of the last request. A URLProtocol sees the body as a stream.
+    static func lastRequest() -> (path: String?, body: Data?) {
+        lock.withLock { (lastPath, lastBody) }
+    }
+
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let method = request.httpMethod ?? "?"
+        let sent = request.httpBodyStream.map(Self.read)
         let (status, body) = Self.lock.withLock { () -> (Int, Data) in
             Self.counts[method, default: 0] += 1
+            Self.lastPath = request.url?.path
+            Self.lastBody = sent
             return (Self.status, Self.body)
         }
         let response = HTTPURLResponse(
@@ -39,6 +49,19 @@ final class CountingProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+
+    private static func read(_ stream: InputStream) -> Data {
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0 else { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }
 
 @Suite("Retry policy", .serialized)
@@ -110,5 +133,29 @@ struct RetryPolicyTests {
         let addition = try await client.addToCollection(user: "emil", folderID: 1, releaseID: 1)
         #expect(addition.instanceID == 99)
         #expect(CountingProtocol.count(forMethod: "POST") == 1)
+    }
+
+    @Test("A move names the current folder in the path and the new one in the body")
+    func moveRequest() async throws {
+        CountingProtocol.configure(status: 204, body: Data())
+        let client = makeClient()
+
+        try await client.moveInstance(user: "emil", fromFolderID: 1, releaseID: 500, instanceID: 77, toFolderID: 4)
+
+        let sent = CountingProtocol.lastRequest()
+        #expect(sent.path == "/users/emil/collection/folders/1/releases/500/instances/77")
+        let body = try JSONSerialization.jsonObject(with: try #require(sent.body)) as? [String: Int]
+        #expect(body == ["folder_id": 4])
+    }
+
+    @Test("A move is retried after a 5xx, since repeating it changes nothing")
+    func moveRetries() async throws {
+        CountingProtocol.configure(status: 503, body: Data(#"{"message":"Unavailable"}"#.utf8))
+        let client = makeClient(maxRetries: 2)
+
+        await #expect(throws: DiscogsError.self) {
+            try await client.moveInstance(user: "emil", fromFolderID: 1, releaseID: 500, instanceID: 77, toFolderID: 4)
+        }
+        #expect(CountingProtocol.count(forMethod: "POST") == 3)
     }
 }

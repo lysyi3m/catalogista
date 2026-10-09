@@ -239,8 +239,8 @@ struct WriteFailureTests {
         defer { try? tokenStore.delete() }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
-        // 404 means Discogs has no such copy — which is exactly what the user asked for. Restoring
-        // the row would resurrect a record that is already gone upstream.
+        // A 404, and the sync confirms Discogs no longer lists the copy: what the user asked for.
+        // Restoring the row would resurrect a record that is already gone upstream.
         let editor = services.makeEditor()
         #expect(await editor.remove(instanceID: 111) == true)
         #expect(try await services.store.itemCount() == 0)
@@ -279,6 +279,130 @@ struct WriteFailureTests {
         let failure = try #require(editor.failure)
         #expect(failure.retry == nil, "retrying an unverifiable write can mislead")
         #expect(failure.message.contains("may have been removed"))
+    }
+
+    @Test("A move files the copy in its new folder and names its old one to Discogs")
+    func moveSucceeds() async throws {
+        FlakyProtocol.reset(writesToFail: 0)
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        let editor = services.makeEditor()
+        #expect(await editor.move(instanceID: 111, toFolderID: 5) == true)
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 5)
+        #expect(FlakyProtocol.lastWritePath?.hasSuffix("/collection/folders/1/releases/500/instances/111") == true)
+    }
+
+    @Test("A rejected move goes back to its folder and offers a retry that moves it")
+    func rejectedMoveRetries() async throws {
+        FlakyProtocol.reset()
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        let editor = services.makeEditor()
+        #expect(await editor.move(instanceID: 111, toFolderID: 5) == false)
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 1, "a rejected move rolls back")
+        let retry = try #require(editor.failure?.retry)
+
+        await retry()
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 5, "the retry must move the copy")
+    }
+
+    @Test("A move whose outcome is unknown takes the folder Discogs reports")
+    func unconfirmedMoveFollowsDiscogs() async throws {
+        FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
+        FlakyProtocol.collectionInstanceIDs = [111]
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        // Discogs still lists the copy in folder 1, so the move did not land.
+        let editor = services.makeEditor()
+        #expect(await editor.move(instanceID: 111, toFolderID: 5) == false)
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 1)
+        #expect(editor.failure?.retry != nil, "a move is safe to repeat")
+    }
+
+    @Test("A move that cannot be confirmed goes back to its folder, and its retry asks Discogs again")
+    func unconfirmedMoveRetrySendsRequest() async throws {
+        // The move answers 503 and the confirming sync fails too: the outcome stays unknown.
+        FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
+        FlakyProtocol.failReads = true
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        let editor = services.makeEditor()
+        #expect(await editor.move(instanceID: 111, toFolderID: 5) == false)
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 1, "back to the last confirmed folder")
+        let retry = try #require(editor.failure?.retry)
+
+        FlakyProtocol.reset(writesToFail: 0)
+        await retry()
+        #expect(FlakyProtocol.lastWritePath != nil, "the retry must reach Discogs, not trust the cache")
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 5)
+    }
+
+    @Test("A change to a copy another editor is still changing is refused, with a retry")
+    func overlappingChangeIsRefused() async throws {
+        FlakyProtocol.reset(writesToFail: 0)
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        // Another editor's move of this copy is still under way.
+        #expect(services.claimCopy(111))
+        let editor = services.makeEditor()
+        #expect(await editor.remove(instanceID: 111) == false)
+        #expect(try await services.store.itemCount() == 1, "the cache is left alone")
+        #expect(FlakyProtocol.writeAttempts == 0, "nothing is sent while the copy is busy")
+        let retry = try #require(editor.failure?.retry)
+
+        services.releaseCopy(111)
+        await retry()
+        #expect(try await services.store.itemCount() == 0)
+    }
+
+    @Test("A removal answered 404 for a copy Discogs still has is not reported as done")
+    func removalNotFoundButStillListed() async throws {
+        // The request named a folder the copy is no longer in, as after an unconfirmed move.
+        FlakyProtocol.reset(failureStatus: 404, writesToFail: .max)
+        FlakyProtocol.collectionInstanceIDs = [111]
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        let editor = services.makeEditor()
+        #expect(await editor.remove(instanceID: 111) == false)
+        #expect(try await services.store.itemCount() == 1, "the sync puts back the copy Discogs still has")
+        #expect(editor.failure?.message.contains("still in your collection") == true)
+        #expect(editor.failure?.retry != nil)
+    }
+
+    @Test("Moves of two copies through one editor both land")
+    func overlappingMovesOfDifferentCopies() async throws {
+        FlakyProtocol.reset(writesToFail: 0)
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111), try makeItem(instanceID: 222)])
+
+        // Two drops on the sidebar in quick succession, through the grid's one editor.
+        let editor = services.makeEditor()
+        async let first = editor.move(instanceID: 111, toFolderID: 5)
+        async let second = editor.move(instanceID: 222, toFolderID: 6)
+        #expect(await [first, second] == [true, true])
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 5)
+        #expect(try await services.store.item(instanceID: 222)?.folderID == 6)
+        #expect(editor.isWorking == false)
     }
 
     @Test("A rejected removal offers a retry that actually removes the copy")

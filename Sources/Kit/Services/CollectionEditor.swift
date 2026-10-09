@@ -9,7 +9,10 @@ import Foundation
 @MainActor
 @Observable
 final class CollectionEditor {
-    private(set) var isWorking = false
+    /// Writes under way. Moves and removals of different copies may overlap, since the per-copy
+    /// claim in `AppServices` keeps two writes off one copy; an add still waits for the last one.
+    private var writesInFlight = 0
+    var isWorking: Bool { writesInFlight > 0 }
     private(set) var failure: Failure?
 
     /// A write the user asked for that did not happen, and the operation that would try it again.
@@ -23,6 +26,15 @@ final class CollectionEditor {
         /// Absent when retrying could do damage — an unconfirmed write may already have been
         /// applied, and repeating it would add a second copy.
         let retry: (@MainActor () async -> Void)?
+
+        /// Another move or removal of the copy has not finished yet.
+        static func copyBusy(_ title: String, retry: @escaping @MainActor () async -> Void) -> Failure {
+            Failure(
+                title: "Unable to Change “\(title)”",
+                message: "A change to this copy is still under way. Try again in a moment.",
+                retry: retry
+            )
+        }
     }
 
     /// The same failure as a status line, for the surfaces that show sync state alongside it.
@@ -48,9 +60,9 @@ final class CollectionEditor {
         folderID: Int = DiscogsFolder.uncategorized
     ) async -> Bool {
         guard !isWorking, let client = services.client else { return false }
-        isWorking = true
+        writesInFlight += 1
         failure = nil
-        defer { isWorking = false }
+        defer { writesInFlight -= 1 }
         let generation = services.accountGeneration
 
         func rejected(_ error: any Error) {
@@ -134,10 +146,10 @@ final class CollectionEditor {
     /// delete.
     @discardableResult
     func remove(instanceID: Int) async -> Bool {
-        guard !isWorking, let client = services.client else { return false }
-        isWorking = true
+        guard let client = services.client else { return false }
+        writesInFlight += 1
         failure = nil
-        defer { isWorking = false }
+        defer { writesInFlight -= 1 }
         let generation = services.accountGeneration
 
         func rejected(_ error: any Error, title: String) {
@@ -156,6 +168,11 @@ final class CollectionEditor {
             return false
         }
         guard let snapshot else { return false }
+        guard services.claimCopy(instanceID) else {
+            failure = .copyBusy(snapshot.title, retry: { [weak self] in _ = await self?.remove(instanceID: instanceID) })
+            return false
+        }
+        defer { services.releaseCopy(instanceID) }
 
         do {
             try await services.store.deleteItem(instanceID: instanceID)
@@ -176,9 +193,16 @@ final class CollectionEditor {
             )
             return true
         } catch let error as DiscogsError where error.isNotFound {
-            // Already gone from Discogs, which is the state the user asked for. Putting the row
-            // back because the server said "no such copy" would undo a removal that has happened.
-            return true
+            guard !hasDisconnected(since: generation) else { return false }
+            // Either already gone, which is what the user asked for, or still on Discogs in another
+            // folder than the one the request named: a move whose outcome was never confirmed
+            // leaves this device on the old folder. Only Discogs can tell the two apart.
+            await services.store.settleWrites([instanceID])
+            return await reconcileRemove(
+                of: snapshot,
+                after: error,
+                message: "“\(snapshot.title)” is still in your collection on Discogs. Try again to remove it."
+            )
         } catch {
             // Disconnected while the request was out: restoring would put the old account's copy
             // into the cleared cache.
@@ -193,6 +217,96 @@ final class CollectionEditor {
             }
             rejected(error, title: "Unable to Remove “\(snapshot.title)”")
             try? await services.store.restore(snapshot)
+            return false
+        }
+    }
+
+    /// Moves a copy to another folder, optimistically.
+    ///
+    /// The copy shows in its new folder at once and goes back if Discogs rejects the move. A move
+    /// is idempotent, so unlike an add it is always safe to offer again.
+    @discardableResult
+    func move(instanceID: Int, toFolderID folderID: Int) async -> Bool {
+        guard let client = services.client else { return false }
+        writesInFlight += 1
+        failure = nil
+        defer { writesInFlight -= 1 }
+        let generation = services.accountGeneration
+
+        let snapshot: CollectionItemSnapshot?
+        do {
+            snapshot = try await services.store.item(instanceID: instanceID)
+        } catch {
+            failure = Failure(title: "Unable to Move Copy", message: error.localizedDescription, retry: nil)
+            return false
+        }
+        guard let snapshot else { return false }
+        guard snapshot.folderID != folderID else { return true }
+        let retry: @MainActor () async -> Void = { [weak self] in
+            _ = await self?.move(instanceID: instanceID, toFolderID: folderID)
+        }
+        guard services.claimCopy(instanceID) else {
+            failure = .copyBusy(snapshot.title, retry: retry)
+            return false
+        }
+        defer { services.releaseCopy(instanceID) }
+
+        func failed(_ error: any Error, title: String) {
+            failure = Failure(title: title, message: error.localizedDescription, retry: retry)
+        }
+
+        do {
+            try await services.store.moveItem(instanceID: instanceID, toFolderID: folderID)
+        } catch {
+            failed(error, title: "Unable to Move “\(snapshot.title)”")
+            return false
+        }
+        services.noteFolderChange()
+        // Protected from syncs until the move ends. See `CollectionStore.writes`.
+        defer { Task { [store = services.store] in await store.settleWrites([instanceID]) } }
+
+        do {
+            let username = try await services.username()
+            try await client.moveInstance(
+                user: username,
+                fromFolderID: snapshot.folderID,
+                releaseID: snapshot.releaseID,
+                instanceID: instanceID,
+                toFolderID: folderID
+            )
+            return true
+        } catch {
+            guard !hasDisconnected(since: generation) else { return false }
+            let discogsError = error as? DiscogsError
+            // Not found means this device's picture is out of date: the copy is gone, or no longer
+            // in the folder the request named. Any other unconfirmed outcome may have been
+            // applied. Either way only Discogs can say where the copy is now.
+            if discogsError?.didNotReachDiscogs == true, discogsError?.isNotFound == false {
+                try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
+                services.noteFolderChange()
+                failed(error, title: "Unable to Move “\(snapshot.title)”")
+                return false
+            }
+            // Settled first: the sync below decides the folder, and must be free to change it.
+            await services.store.settleWrites([instanceID])
+            guard await services.syncController.syncAfterWrite() else {
+                // Unconfirmed, so back to the last folder Discogs confirmed. Left in the new one, a
+                // retry would find the copy already there and succeed without asking Discogs.
+                try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
+                services.noteFolderChange()
+                failure = Failure(
+                    title: "Unable to Confirm Move",
+                    message: "“\(snapshot.title)” may have moved. Sync your collection to confirm.",
+                    retry: retry
+                )
+                return false
+            }
+            guard let now = try? await services.store.item(instanceID: instanceID) else {
+                // Removed on Discogs in the meantime; there is nothing left to move.
+                return false
+            }
+            if now.folderID == folderID { return true }
+            failed(error, title: "Unable to Move “\(snapshot.title)”")
             return false
         }
     }
@@ -237,7 +351,12 @@ final class CollectionEditor {
         return false
     }
 
-    private func reconcileRemove(of snapshot: CollectionItemSnapshot, after error: any Error) async -> Bool {
+    /// `message` replaces the error's own text when Discogs turns out to still have the copy.
+    private func reconcileRemove(
+        of snapshot: CollectionItemSnapshot,
+        after error: any Error,
+        message: String? = nil
+    ) async -> Bool {
         guard await services.syncController.syncAfterWrite() else {
             failure = Failure(
                 title: "Unable to Confirm Removal",
@@ -250,7 +369,7 @@ final class CollectionEditor {
         if (try? await services.store.item(instanceID: snapshot.instanceID)) == nil { return true }
         failure = Failure(
             title: "Unable to Remove “\(snapshot.title)”",
-            message: error.localizedDescription,
+            message: message ?? error.localizedDescription,
             retry: { [weak self] in _ = await self?.remove(instanceID: snapshot.instanceID) }
         )
         return false

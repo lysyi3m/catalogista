@@ -79,10 +79,11 @@ public struct ContentView: View {
     @State private var folderCounts: [Int: Int] = [:]
     @State private var matchCount = 0
 
-    /// What the counts depend on. A copy changes folder only in a sync, so the sync time stands in
-    /// for moves; adds and removes change the count.
+    /// What the counts depend on. Adds and removes change the count; a move on this device bumps
+    /// the folder revision, and the sync time stands in for moves made elsewhere.
     private struct CountsKey: Hashable {
         let itemCount: Int
+        let folderRevision: Int
         let lastSyncedAt: Date?
         let folderID: Int
         let query: String
@@ -91,6 +92,7 @@ public struct ContentView: View {
     private var countsKey: CountsKey {
         CountsKey(
             itemCount: allItems.count,
+            folderRevision: services.folderRevision,
             lastSyncedAt: syncController.lastSyncedAt,
             folderID: folderID,
             query: searchQuery
@@ -159,6 +161,12 @@ public struct ContentView: View {
             .collectionFailureAlert(editor)
     }
 
+    #if os(macOS)
+    /// Below this the record page's header no longer fits beside its cover, and the status bar's
+    /// count collides with the sync state.
+    private static let detailMinimumWidth: CGFloat = 620
+    #endif
+
     /// Onboarding has nothing to put in a sidebar, so the split view appears only with a token.
     @ViewBuilder
     private var root: some View {
@@ -168,8 +176,16 @@ public struct ContentView: View {
             } detail: {
                 detail
             }
+            #if os(macOS)
+            // The split view squeezes its columns rather than passing a column's minimum up to the
+            // window, so the window's own minimum makes room for the sidebar while it shows.
+            .frame(minWidth: isSidebarVisible ? Self.detailMinimumWidth + 220 : Self.detailMinimumWidth)
+            #endif
         } else {
             detail
+                #if os(macOS)
+                .frame(minWidth: Self.detailMinimumWidth)
+                #endif
         }
     }
 
@@ -191,7 +207,12 @@ public struct ContentView: View {
                             value: folder.id,
                             title: folder.name,
                             systemImage: "folder",
-                            count: folderCounts[folder.id] ?? 0
+                            count: folderCounts[folder.id] ?? 0,
+                            onDrop: { copy in
+                                guard copy.folderID != folder.id else { return false }
+                                Task { await editor?.move(instanceID: copy.instanceID, toFolderID: folder.id) }
+                                return true
+                            }
                         )
                     }
                 }
@@ -305,7 +326,11 @@ public struct ContentView: View {
                 direction: direction,
                 itemWidth: itemWidth,
                 searchQuery: searchQuery,
+                destinations: CollectionFolders.destinations(folders),
                 onSelect: { selection = $0 },
+                onMove: { item, folderID in
+                    Task { await editor?.move(instanceID: item.instanceID, toFolderID: folderID) }
+                },
                 onRequestRemove: { pendingRemoval = $0 }
             )
             // A fresh view per folder, so a new folder opens at the top rather than at the
@@ -585,8 +610,29 @@ private struct SidebarRow: View {
     let title: String
     let systemImage: String
     let count: Int
+    /// Moves a dropped copy into this folder; nil where a copy cannot be filed, as on Collection.
+    /// Returns false to refuse the drop.
+    var onDrop: ((CopyReference) -> Bool)?
+
+    @State private var isTargeted = false
 
     var body: some View {
+        if let onDrop {
+            row
+                .dropDestination(for: CopyReference.self) { copies, _ in
+                    guard let copy = copies.first else { return false }
+                    return onDrop(copy)
+                } isTargeted: { isTargeted = $0 }
+                .listRowBackground(
+                    isTargeted ? RoundedRectangle(cornerRadius: 8).fill(.tint.opacity(0.18)) : nil
+                )
+        } else {
+            row
+        }
+    }
+
+    @ViewBuilder
+    private var row: some View {
         #if os(macOS)
         Label(title, systemImage: systemImage)
             .badge(count)

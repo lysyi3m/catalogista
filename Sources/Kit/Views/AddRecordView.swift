@@ -51,7 +51,7 @@ struct AddRecordView: View {
     }
 
     private var targets: [FolderSnapshot] {
-        CollectionFolders.addTargets(cachedFolders.map(\.snapshot))
+        CollectionFolders.destinations(cachedFolders.map(\.snapshot))
     }
 
     private func confirm(_ result: SearchResult) {

@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 /// One record: cover, the facts that identify the edition, and its tracklist on request.
@@ -10,6 +11,7 @@ struct RecordDetailView: View {
 
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
+    @Query private var cachedFolders: [CachedFolder]
 
     @State private var loader: ReleaseDetailLoader?
     @State private var editor: CollectionEditor?
@@ -61,7 +63,6 @@ struct RecordDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar { actions }
         .task {
             editor = editor ?? services.makeEditor()
             let loader = loader ?? ReleaseDetailLoader(services: services)
@@ -71,7 +72,7 @@ struct RecordDetailView: View {
             // A page left open refreshes itself once its data passes six hours old.
             await loader.keepFresh(releaseID: item.releaseID)
         }
-        // An alert rather than a confirmation dialog. Raised from the toolbar menu, a dialog is
+        // An alert rather than a confirmation dialog. Raised from the "…" menu, a dialog is
         // presented as a popover anchored to that menu and inherits its width. That crams the
         // message into a few words per line and hides the cancel button behind a tap outside.
         .alert(
@@ -92,26 +93,17 @@ struct RecordDetailView: View {
 
     // MARK: - Actions
 
-    /// Record-scoped actions live in the toolbar rather than the page body: they are about the
-    /// record rather than part of it.
-    @ToolbarContentBuilder
-    private var actions: some ToolbarContent {
-        ToolbarItem {
-            Menu {
-                Link(destination: discogsURL) {
-                    Label("View on Discogs", systemImage: "arrow.up.right.square")
-                }
-                Divider()
-                Button(role: .destructive) {
-                    isConfirmingRemoval = true
-                } label: {
-                    Label("Remove from Collection…", systemImage: "trash")
-                }
-                .disabled(editor?.isWorking ?? true)
-            } label: {
-                Label("Actions", systemImage: "ellipsis.circle")
-            }
-        }
+    private var actions: some View {
+        RecordActionRow(
+            folderID: item.folderID,
+            folders: CollectionFolders.destinations(cachedFolders.map(\.snapshot)),
+            discogsURL: discogsURL,
+            isWorking: editor?.isWorking ?? true,
+            onMove: { folderID in
+                Task { await editor?.move(instanceID: item.instanceID, toFolderID: folderID) }
+            },
+            onRequestRemove: { isConfirmingRemoval = true }
+        )
     }
 
     private var discogsURL: URL {
@@ -147,7 +139,9 @@ struct RecordDetailView: View {
                 item.formatSummary,
             ]),
             tags: item.genres + item.styles
-        )
+        ) {
+            actions
+        }
     }
 
     // MARK: - Facts
@@ -192,10 +186,7 @@ struct RecordDetailView: View {
     private var notes: some View {
         if let notes = detail?.notes, !notes.isEmpty {
             PageSection("Notes") {
-                Text(DiscogsMarkup.attributed(notes))
-                    .font(.callout)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                NotesText(notes: DiscogsMarkup.attributed(notes))
             }
         }
     }

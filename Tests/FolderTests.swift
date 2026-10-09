@@ -66,15 +66,15 @@ struct FolderTests {
 
     @Test("An add preselects the folder on screen, and Uncategorized from Collection")
     func addTarget() {
-        let targets = CollectionFolders.addTargets([folder(0, "All"), folder(1, "Uncategorized"), folder(5, "Jazz")])
+        let targets = CollectionFolders.destinations([folder(0, "All"), folder(1, "Uncategorized"), folder(5, "Jazz")])
         #expect(targets.map(\.id) == [1, 5])
         #expect(CollectionFolders.addTarget(for: 5, among: targets) == 5)
         #expect(CollectionFolders.addTarget(for: DiscogsFolder.all, among: targets) == DiscogsFolder.uncategorized)
     }
 
-    @Test("Uncategorized is an add target even before a first sync")
-    func addTargetsWithoutSync() {
-        #expect(CollectionFolders.addTargets([]).map(\.id) == [DiscogsFolder.uncategorized])
+    @Test("Uncategorized is a destination even before a first sync")
+    func destinationsWithoutSync() {
+        #expect(CollectionFolders.destinations([]).map(\.id) == [DiscogsFolder.uncategorized])
     }
 
     @Test("Search narrows the folder on screen, and Collection searches every folder")

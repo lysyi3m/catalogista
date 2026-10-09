@@ -68,6 +68,11 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # Required by the Mac App Store; iOS takes its category from App Store Connect.
         LSApplicationCategoryType: public.app-category.music
+        # A copy dragged from the grid or list onto a sidebar folder (`CopyReference`).
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.mlkshkvch.catalogista.copy
+            UTTypeDescription: Catalogista Copy
+            UTTypeConformsTo: [public.data]
         UILaunchScreen: {}
         # Ignored on macOS. Without these an iOS Release build warns, and the app would inherit
         # whatever the toolchain defaults to rather than what it was designed for.

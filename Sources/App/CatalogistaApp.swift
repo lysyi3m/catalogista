@@ -53,10 +53,9 @@ struct CatalogistaApp: App {
         // with it, and the `.newItem` group below replaces File ▸ New Window with Add Record….
         Window("Catalogista", id: "collection") {
             rootView
-                // Below this the status bar runs out of room and the record count collides with
-                // the sync state: the density control, the centred count and the status need
-                // roughly 500pt between them before anything overlaps.
-                .frame(minWidth: 560, minHeight: 420)
+                // Height only. Each screen sets its own minimum width: an outer minimum here would
+                // cap the window's, whatever a screen inside needs (`ContentView`).
+                .frame(minHeight: 420)
         }
         .defaultSize(width: 1100, height: 760)
         .commands {
@@ -118,21 +117,28 @@ struct CatalogistaApp: App {
                 .environment(services)
                 .modelContainer(services.modelContainer)
         case .failed(let message):
-            ContentUnavailableView {
-                Label("Cache Unavailable", systemImage: "externaldrive.badge.xmark")
-            } description: {
-                Text(message)
-            } actions: {
-                Button("Try Again") { startup = Self.start() }
-                // The cache holds nothing Discogs does not, so rebuilding loses nothing. The next
-                // sync downloads the collection; the token in the Keychain stays.
-                Button("Rebuild Cache") {
-                    do {
-                        try AppServices.discardModelStore()
-                        startup = Self.start()
-                    } catch {
-                        startup = .failed(error.localizedDescription)
-                    }
+            failureView(message)
+                #if os(macOS)
+                .frame(minWidth: 560)
+                #endif
+        }
+    }
+
+    private func failureView(_ message: String) -> some View {
+        ContentUnavailableView {
+            Label("Cache Unavailable", systemImage: "externaldrive.badge.xmark")
+        } description: {
+            Text(message)
+        } actions: {
+            Button("Try Again") { startup = Self.start() }
+            // The cache holds nothing Discogs does not, so rebuilding loses nothing. The next
+            // sync downloads the collection; the token in the Keychain stays.
+            Button("Rebuild Cache") {
+                do {
+                    try AppServices.discardModelStore()
+                    startup = Self.start()
+                } catch {
+                    startup = .failed(error.localizedDescription)
                 }
             }
         }

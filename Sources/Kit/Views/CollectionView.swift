@@ -20,6 +20,9 @@ struct CollectionView: View {
     private let searchQuery: String
     private let onSelect: (CachedCollectionItem) -> Void
     private let onRequestRemove: (CachedCollectionItem) -> Void
+    /// Where a copy can be moved, for the context menu. See `CollectionFolders.destinations`.
+    private let destinations: [FolderSnapshot]
+    private let onMove: (CachedCollectionItem, Int) -> Void
 
     @State private var hoveredID: PersistentIdentifier?
     /// Room under a short list, and the grid's visible height. Both keep the credit on the bottom
@@ -36,7 +39,9 @@ struct CollectionView: View {
         direction: SortDirection,
         itemWidth: CGFloat,
         searchQuery: String,
+        destinations: [FolderSnapshot],
         onSelect: @escaping (CachedCollectionItem) -> Void,
+        onMove: @escaping (CachedCollectionItem, Int) -> Void,
         onRequestRemove: @escaping (CachedCollectionItem) -> Void
     ) {
         var descriptor = FetchDescriptor<CachedCollectionItem>()
@@ -52,6 +57,34 @@ struct CollectionView: View {
         self.itemWidth = itemWidth
         self.onSelect = onSelect
         self.onRequestRemove = onRequestRemove
+        self.destinations = destinations
+        self.onMove = onMove
+    }
+
+    /// The cover alone, at most 72pt, so the sidebar stays visible under the pointer.
+    ///
+    /// Asked for at `sourceEdge`, the size the cell already decoded it at, and only drawn smaller.
+    /// macOS snapshots the preview the moment the drag starts, and only an image already decoded
+    /// at the requested size is there in time; any other size would start on the placeholder.
+    private func dragPreview(for item: CachedCollectionItem, sourceEdge: CGFloat) -> some View {
+        let drawn = min(sourceEdge, 72)
+        return CoverImageView(releaseID: item.releaseID, remoteURL: item.artwork.url, kind: item.artwork.kind, edge: sourceEdge)
+            .frame(width: drawn, height: drawn)
+            .clipShape(.rect(cornerRadius: 6))
+            // Drawn outside this view's hierarchy, so it inherits none of its environment: without
+            // this the cover cannot reach the image cache, and reading it traps.
+            .environment(services)
+    }
+
+    private func contextMenu(for item: CachedCollectionItem) -> some View {
+        RecordContextMenu(
+            folderID: item.folderID,
+            folders: destinations,
+            discogsURL: DiscogsNotice.releaseURL(id: item.releaseID),
+            onOpen: { onSelect(item) },
+            onMove: { onMove(item, $0) },
+            onRequestRemove: { onRequestRemove(item) }
+        )
     }
 
     var body: some View {
@@ -123,13 +156,8 @@ struct CollectionView: View {
                             )
                         }
                             .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Open") { onSelect(item) }
-                                Divider()
-                                Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
-                                    onRequestRemove(item)
-                                }
-                            }
+                            .contextMenu { contextMenu(for: item) }
+                            .draggable(item.copyReference) { dragPreview(for: item, sourceEdge: ReleaseRow.defaultCoverEdge) }
                             #if os(iOS)
                             .swipeActions(edge: .trailing) {
                                 Button("Remove", systemImage: "trash", role: .destructive) {
@@ -180,13 +208,8 @@ struct CollectionView: View {
                         // A dense grid has no caption, and the cover says nothing to VoiceOver.
                         .accessibilityLabel("\(item.title), \(item.artistName)")
                         // Long press on iOS, right click on macOS.
-                        .contextMenu {
-                            Button("Open") { onSelect(item) }
-                            Divider()
-                            Button("Remove from Collection…", systemImage: "trash", role: .destructive) {
-                                onRequestRemove(item)
-                            }
-                        }
+                        .contextMenu { contextMenu(for: item) }
+                        .draggable(item.copyReference) { dragPreview(for: item, sourceEdge: edge) }
                     }
                 }
                 // No bottom padding: the credit below brings its own space.

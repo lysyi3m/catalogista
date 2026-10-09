@@ -14,7 +14,9 @@ struct ReleaseRow: View {
     let title: String
     let artist: String
     let details: String
-    var coverEdge: CGFloat = 56
+    var coverEdge: CGFloat = Self.defaultCoverEdge
+
+    static let defaultCoverEdge: CGFloat = 56
 
     var body: some View {
         HStack(spacing: 12) {
