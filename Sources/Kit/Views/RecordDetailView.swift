@@ -14,7 +14,7 @@ struct RecordDetailView: View {
     @State private var loader: ReleaseDetailLoader?
     @State private var editor: CollectionEditor?
     @State private var isConfirmingRemoval = false
-    @State private var isTracklistExpanded = false
+    @State private var isTracklistExpanded = true
     /// The visible height. A short page is stretched to it, which keeps the credit on the bottom
     /// edge. See `creditViewport(_:)`.
     @State private var viewportHeight: CGFloat = 0
