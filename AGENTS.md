@@ -83,7 +83,9 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
 - **Copy** — the instance the user owns. Removal flows.
 
 Never "pressing": the app holds CDs as well as vinyl. Never "album": wrong for the singles and
-EPs Discogs is full of. The label/catalogue/country block on the record page is **Edition**.
+EPs Discogs is full of. On the record page the table beside the cover (label, catalogue number,
+format, country, release date, genres and styles) is **Edition**; the section about the copy itself (its folder,
+when it was added, and the owner's custom fields such as media and sleeve condition) is **Copy**.
 
 ## Caching
 

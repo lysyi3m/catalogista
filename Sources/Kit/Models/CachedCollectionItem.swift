@@ -34,6 +34,9 @@ final class CachedCollectionItem {
     var catalogNumber: String?
     var genres: [String]
     var styles: [String]
+    /// The owner's custom field values on this copy. Existing rows migrate to empty and are
+    /// filled by the next sync.
+    var fieldValues: [FieldValue] = []
 
     /// Case-folded sort keys, stored so SwiftData can sort in the store rather than in memory.
     var sortArtist: String
@@ -56,6 +59,7 @@ final class CachedCollectionItem {
         catalogNumber = item.basicInformation.labels.first?.catno
         genres = item.basicInformation.genres
         styles = item.basicInformation.styles
+        fieldValues = item.fieldValues
         sortArtist = Self.sortKey(item.basicInformation.artistDisplayName)
         sortTitle = Self.sortKey(item.basicInformation.title)
     }
@@ -100,6 +104,7 @@ final class CachedCollectionItem {
         catalogNumber = snapshot.catalogNumber
         genres = snapshot.genres
         styles = snapshot.styles
+        fieldValues = snapshot.fieldValues
         sortArtist = Self.sortKey(snapshot.artistName)
         sortTitle = Self.sortKey(snapshot.title)
     }
@@ -141,6 +146,7 @@ final class CachedCollectionItem {
         catalogNumber = item.basicInformation.labels.first?.catno
         genres = item.basicInformation.genres
         styles = item.basicInformation.styles
+        fieldValues = item.fieldValues
         sortArtist = Self.sortKey(item.basicInformation.artistDisplayName)
         sortTitle = Self.sortKey(item.basicInformation.title)
     }

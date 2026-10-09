@@ -1,3 +1,4 @@
+import DiscogsKit
 import Foundation
 
 /// Sendable value copies of the cache models.
@@ -21,6 +22,7 @@ struct CollectionItemSnapshot: Sendable, Hashable, Identifiable {
     var catalogNumber: String?
     var genres: [String]
     var styles: [String]
+    var fieldValues: [FieldValue]
 
     var id: Int { instanceID }
 }
@@ -48,7 +50,8 @@ extension CachedCollectionItem {
             labelName: labelName,
             catalogNumber: catalogNumber,
             genres: genres,
-            styles: styles
+            styles: styles,
+            fieldValues: fieldValues
         )
     }
 }

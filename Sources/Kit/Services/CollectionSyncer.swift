@@ -146,6 +146,12 @@ actor CollectionSyncer {
 
         let itemsRemoved = try await store.pruneItems(keeping: seenInstanceIDs)
         try await store.replaceFolders(folders, keeping: seenFolderIDs)
+        // Names for the field values the pages carried. Best effort: they only label values on
+        // the record page, so a failure keeps the names from the last sync rather than failing
+        // this one.
+        if let fields = try? await client.customFields(user: identity.username) {
+            try await store.replaceFields(fields)
+        }
         if rebuilding {
             try await store.pruneReleaseDetails(keeping: [])
             try await imageCache.removeAll()

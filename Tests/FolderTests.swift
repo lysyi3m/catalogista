@@ -27,7 +27,8 @@ struct FolderTests {
             labelName: nil,
             catalogNumber: nil,
             genres: [],
-            styles: []
+            styles: [],
+            fieldValues: []
         ))
     }
 
@@ -70,6 +71,14 @@ struct FolderTests {
         #expect(targets.map(\.id) == [1, 5])
         #expect(CollectionFolders.addTarget(for: 5, among: targets) == 5)
         #expect(CollectionFolders.addTarget(for: DiscogsFolder.all, among: targets) == DiscogsFolder.uncategorized)
+    }
+
+    @Test("The folder menu puts Uncategorized apart, and has one section when there is nothing else")
+    func menuSections() {
+        let ids = { (folders: [FolderSnapshot]) in CollectionFolders.menuSections(CollectionFolders.destinations(folders)).map { $0.map(\.id) } }
+        #expect(ids([folder(1, "Uncategorized"), folder(5, "Jazz"), folder(6, "Metal")]) == [[1], [5, 6]])
+        #expect(ids([folder(1, "Uncategorized")]) == [[1]], "no folders of one's own: no separator")
+        #expect(ids([]) == [[1]], "before a first sync")
     }
 
     @Test("Uncategorized is a destination even before a first sync")

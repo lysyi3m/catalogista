@@ -230,6 +230,33 @@ actor CollectionStore {
         try saveOrRollback()
     }
 
+    // MARK: - Custom fields
+
+    /// The owner's custom fields, in the order discogs.com shows them.
+    func fields() throws -> [CustomField] {
+        var descriptor = FetchDescriptor<CachedField>()
+        descriptor.sortBy = [SortDescriptor(\.position), SortDescriptor(\.id)]
+        return try modelContext.fetch(descriptor).map(\.field)
+    }
+
+    /// Makes the cached fields exactly `fields`. Unlike folders, nothing refers to a field that
+    /// would be stranded: a value whose field is gone is simply not shown.
+    func replaceFields(_ fields: [CustomField]) throws {
+        var existing = try Dictionary(
+            modelContext.fetch(FetchDescriptor<CachedField>()).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for field in fields {
+            if let cached = existing.removeValue(forKey: field.id) {
+                cached.update(from: field)
+            } else {
+                modelContext.insert(CachedField(from: field))
+            }
+        }
+        for stale in existing.values { modelContext.delete(stale) }
+        try saveOrRollback()
+    }
+
     // MARK: - Writes during a sync
 
     /// Copies added, removed or moved on this device, for as long as a sync could still undo them.
@@ -284,6 +311,7 @@ actor CollectionStore {
         try modelContext.delete(model: CachedCollectionItem.self)
         try modelContext.delete(model: CachedReleaseDetail.self)
         try modelContext.delete(model: CachedFolder.self)
+        try modelContext.delete(model: CachedField.self)
         try saveOrRollback()
     }
 
