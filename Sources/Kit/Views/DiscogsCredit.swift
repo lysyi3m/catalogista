@@ -73,6 +73,11 @@ struct DiscogsCredit: View {
             }
             // Explicit: an iOS list row draws a link in the primary colour, like plain text.
             .foregroundStyle(.tint)
+            #if os(iOS)
+            // A list row with one button-like control turns the whole row into that control, and
+            // the row is stretched to fill the empty space below the list.
+            .buttonStyle(.borderless)
+            #endif
             .accessibilityLabel("View on Discogs")
         }
         .font(.caption)
