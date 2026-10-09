@@ -17,6 +17,8 @@ public struct ContentView: View {
     /// with the folder list one step back. Back clears it; bound to the folder itself, which is
     /// never empty, Back would push the records again at once.
     @State private var sidebarSelection: Int?
+    /// The sidebar row under the pointer, tracked on macOS only. See `SidebarClicks`.
+    @State private var hoveredRow: Int?
     #if os(iOS)
     /// Room under the folder list, which pins its credit to the bottom edge. See `creditSlack(_:)`.
     @State private var sidebarCreditSlack: CGFloat = 0
@@ -199,7 +201,13 @@ public struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $sidebarSelection) {
-            SidebarRow(value: DiscogsFolder.all, title: "Collection", systemImage: "square.stack", count: allItems.count)
+            SidebarRow(
+                value: DiscogsFolder.all,
+                title: "Collection",
+                systemImage: "square.stack",
+                count: allItems.count,
+                hoveredRow: $hoveredRow
+            )
             if !folders.isEmpty {
                 Section("Folders") {
                     ForEach(folders) { folder in
@@ -208,6 +216,7 @@ public struct ContentView: View {
                             title: folder.name,
                             systemImage: "folder",
                             count: folderCounts[folder.id] ?? 0,
+                            hoveredRow: $hoveredRow,
                             onDrop: { copy in
                                 guard copy.folderID != folder.id else { return false }
                                 Task { await editor?.move(instanceID: copy.instanceID, toFolderID: folder.id) }
@@ -243,6 +252,11 @@ public struct ContentView: View {
         #endif
         #if os(macOS)
         .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+        .modifier(SidebarClicks {
+            // The folder a record was opened from goes back to that folder, as Back does. Any
+            // other row changes the folder, which closes the record anyway.
+            if hoveredRow != nil, hoveredRow == sidebarSelection { selection = nil }
+        })
         #endif
     }
 
@@ -610,6 +624,8 @@ private struct SidebarRow: View {
     let title: String
     let systemImage: String
     let count: Int
+    /// Set to this row's value while the pointer is over it. macOS only; see `SidebarClicks`.
+    @Binding var hoveredRow: Int?
     /// Moves a dropped copy into this folder; nil where a copy cannot be filed, as on Collection.
     /// Returns false to refuse the drop.
     var onDrop: ((CopyReference) -> Bool)?
@@ -635,6 +651,14 @@ private struct SidebarRow: View {
     private var row: some View {
         #if os(macOS)
         Label(title, systemImage: systemImage)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onHover { inside in
+                if inside {
+                    hoveredRow = value
+                } else if hoveredRow == value {
+                    hoveredRow = nil
+                }
+            }
             .badge(count)
             .tag(value)
         #else
@@ -652,6 +676,33 @@ private struct SidebarRow: View {
         #endif
     }
 }
+
+#if os(macOS)
+/// Reports every mouse-down in the app, so the sidebar can act on a click on the row already
+/// selected, which the list's selection does not report.
+///
+/// A gesture on the row competes with the list's own click handling and lost clicks, and clearing
+/// the selection under a record resets the split view's detail column. A monitor only observes:
+/// it hands every event on unchanged.
+private struct SidebarClicks: ViewModifier {
+    let onMouseDown: () -> Void
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+                    MainActor.assumeIsolated { onMouseDown() }
+                    return event
+                }
+            }
+            .onDisappear {
+                if let monitor { NSEvent.removeMonitor(monitor) }
+                monitor = nil
+            }
+    }
+}
+#endif
 
 /// The search field, present only once there is a collection to search. It searches the folder on
 /// screen, and the query stays as the user moves between folders.
