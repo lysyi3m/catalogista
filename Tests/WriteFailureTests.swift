@@ -239,8 +239,8 @@ struct WriteFailureTests {
         defer { try? tokenStore.delete() }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
-        // 404 means Discogs has no such copy — which is exactly what the user asked for. Restoring
-        // the row would resurrect a record that is already gone upstream.
+        // A 404, and the sync confirms Discogs no longer lists the copy: what the user asked for.
+        // Restoring the row would resurrect a record that is already gone upstream.
         let editor = services.makeEditor()
         #expect(await editor.remove(instanceID: 111) == true)
         #expect(try await services.store.itemCount() == 0)
@@ -368,6 +368,41 @@ struct WriteFailureTests {
         services.releaseCopy(111)
         await retry()
         #expect(try await services.store.itemCount() == 0)
+    }
+
+    @Test("A removal answered 404 for a copy Discogs still has is not reported as done")
+    func removalNotFoundButStillListed() async throws {
+        // The request named a folder the copy is no longer in, as after an unconfirmed move.
+        FlakyProtocol.reset(failureStatus: 404, writesToFail: .max)
+        FlakyProtocol.collectionInstanceIDs = [111]
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        let editor = services.makeEditor()
+        #expect(await editor.remove(instanceID: 111) == false)
+        #expect(try await services.store.itemCount() == 1, "the sync puts back the copy Discogs still has")
+        #expect(editor.failure?.message.contains("still in your collection") == true)
+        #expect(editor.failure?.retry != nil)
+    }
+
+    @Test("Moves of two copies through one editor both land")
+    func overlappingMovesOfDifferentCopies() async throws {
+        FlakyProtocol.reset(writesToFail: 0)
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111), try makeItem(instanceID: 222)])
+
+        // Two drops on the sidebar in quick succession, through the grid's one editor.
+        let editor = services.makeEditor()
+        async let first = editor.move(instanceID: 111, toFolderID: 5)
+        async let second = editor.move(instanceID: 222, toFolderID: 6)
+        #expect(await [first, second] == [true, true])
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 5)
+        #expect(try await services.store.item(instanceID: 222)?.folderID == 6)
+        #expect(editor.isWorking == false)
     }
 
     @Test("A rejected removal offers a retry that actually removes the copy")

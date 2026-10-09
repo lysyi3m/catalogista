@@ -9,7 +9,10 @@ import Foundation
 @MainActor
 @Observable
 final class CollectionEditor {
-    private(set) var isWorking = false
+    /// Writes under way. Moves and removals of different copies may overlap, since the per-copy
+    /// claim in `AppServices` keeps two writes off one copy; an add still waits for the last one.
+    private var writesInFlight = 0
+    var isWorking: Bool { writesInFlight > 0 }
     private(set) var failure: Failure?
 
     /// A write the user asked for that did not happen, and the operation that would try it again.
@@ -57,9 +60,9 @@ final class CollectionEditor {
         folderID: Int = DiscogsFolder.uncategorized
     ) async -> Bool {
         guard !isWorking, let client = services.client else { return false }
-        isWorking = true
+        writesInFlight += 1
         failure = nil
-        defer { isWorking = false }
+        defer { writesInFlight -= 1 }
         let generation = services.accountGeneration
 
         func rejected(_ error: any Error) {
@@ -143,10 +146,10 @@ final class CollectionEditor {
     /// delete.
     @discardableResult
     func remove(instanceID: Int) async -> Bool {
-        guard !isWorking, let client = services.client else { return false }
-        isWorking = true
+        guard let client = services.client else { return false }
+        writesInFlight += 1
         failure = nil
-        defer { isWorking = false }
+        defer { writesInFlight -= 1 }
         let generation = services.accountGeneration
 
         func rejected(_ error: any Error, title: String) {
@@ -190,9 +193,16 @@ final class CollectionEditor {
             )
             return true
         } catch let error as DiscogsError where error.isNotFound {
-            // Already gone from Discogs, which is the state the user asked for. Putting the row
-            // back because the server said "no such copy" would undo a removal that has happened.
-            return true
+            guard !hasDisconnected(since: generation) else { return false }
+            // Either already gone, which is what the user asked for, or still on Discogs in another
+            // folder than the one the request named: a move whose outcome was never confirmed
+            // leaves this device on the old folder. Only Discogs can tell the two apart.
+            await services.store.settleWrites([instanceID])
+            return await reconcileRemove(
+                of: snapshot,
+                after: error,
+                message: "“\(snapshot.title)” is still in your collection on Discogs. Try again to remove it."
+            )
         } catch {
             // Disconnected while the request was out: restoring would put the old account's copy
             // into the cleared cache.
@@ -217,10 +227,10 @@ final class CollectionEditor {
     /// is idempotent, so unlike an add it is always safe to offer again.
     @discardableResult
     func move(instanceID: Int, toFolderID folderID: Int) async -> Bool {
-        guard !isWorking, let client = services.client else { return false }
-        isWorking = true
+        guard let client = services.client else { return false }
+        writesInFlight += 1
         failure = nil
-        defer { isWorking = false }
+        defer { writesInFlight -= 1 }
         let generation = services.accountGeneration
 
         let snapshot: CollectionItemSnapshot?
@@ -341,7 +351,12 @@ final class CollectionEditor {
         return false
     }
 
-    private func reconcileRemove(of snapshot: CollectionItemSnapshot, after error: any Error) async -> Bool {
+    /// `message` replaces the error's own text when Discogs turns out to still have the copy.
+    private func reconcileRemove(
+        of snapshot: CollectionItemSnapshot,
+        after error: any Error,
+        message: String? = nil
+    ) async -> Bool {
         guard await services.syncController.syncAfterWrite() else {
             failure = Failure(
                 title: "Unable to Confirm Removal",
@@ -354,7 +369,7 @@ final class CollectionEditor {
         if (try? await services.store.item(instanceID: snapshot.instanceID)) == nil { return true }
         failure = Failure(
             title: "Unable to Remove “\(snapshot.title)”",
-            message: error.localizedDescription,
+            message: message ?? error.localizedDescription,
             retry: { [weak self] in _ = await self?.remove(instanceID: snapshot.instanceID) }
         )
         return false
