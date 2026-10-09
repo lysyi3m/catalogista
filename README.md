@@ -29,7 +29,7 @@
 - **Search** the collection or the open folder as you type, offline.
 - **Record detail** — full-size cover, edition details, tracklist, and a link out to Discogs.
 - **Add** — search Discogs, pick the exact release, pick its folder.
-- **Move** — file a copy in another folder from its page, or a long press on any cover (right click on Mac).
+- **Move** — file a copy in another folder from its page, a long press on any cover (right click on Mac), or by dragging it onto a folder in the sidebar.
 - **Remove** — from the same places, behind a confirmation.
 - **Offline** — the whole collection stays browsable from the local cache.
 

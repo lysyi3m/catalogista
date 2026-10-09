@@ -193,7 +193,12 @@ public struct ContentView: View {
                             value: folder.id,
                             title: folder.name,
                             systemImage: "folder",
-                            count: folderCounts[folder.id] ?? 0
+                            count: folderCounts[folder.id] ?? 0,
+                            onDrop: { copy in
+                                guard copy.folderID != folder.id else { return false }
+                                Task { await editor?.move(instanceID: copy.instanceID, toFolderID: folder.id) }
+                                return true
+                            }
                         )
                     }
                 }
@@ -591,8 +596,29 @@ private struct SidebarRow: View {
     let title: String
     let systemImage: String
     let count: Int
+    /// Moves a dropped copy into this folder; nil where a copy cannot be filed, as on Collection.
+    /// Returns false to refuse the drop.
+    var onDrop: ((CopyReference) -> Bool)?
+
+    @State private var isTargeted = false
 
     var body: some View {
+        if let onDrop {
+            row
+                .dropDestination(for: CopyReference.self) { copies, _ in
+                    guard let copy = copies.first else { return false }
+                    return onDrop(copy)
+                } isTargeted: { isTargeted = $0 }
+                .listRowBackground(
+                    isTargeted ? RoundedRectangle(cornerRadius: 8).fill(.tint.opacity(0.18)) : nil
+                )
+        } else {
+            row
+        }
+    }
+
+    @ViewBuilder
+    private var row: some View {
         #if os(macOS)
         Label(title, systemImage: systemImage)
             .badge(count)
