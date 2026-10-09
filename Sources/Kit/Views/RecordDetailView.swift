@@ -182,27 +182,11 @@ struct RecordDetailView: View {
         #endif
     }
 
-    /// The lines of a note. Discogs breaks them with `\r\n` or `\n`.
-    private static func lines(of notes: String) -> [String] {
-        notes.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
-    }
-
     @ViewBuilder
     private var notes: some View {
         if let notes = detail?.notes, !notes.isEmpty {
             PageSection("Notes") {
-                // One text per line. On macOS a selectable text of several lines is laid out one
-                // way while its pane has focus and another way when it does not, so the lines below
-                // the first moved when focus went to the sidebar. Separate lines do not move.
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(Self.lines(of: notes).enumerated()), id: \.offset) { _, line in
-                        // A blank line keeps its height.
-                        Text(DiscogsMarkup.attributed(line.isEmpty ? " " : line))
-                    }
-                }
-                .font(.callout)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                NotesText(notes: DiscogsMarkup.attributed(notes))
             }
         }
     }
