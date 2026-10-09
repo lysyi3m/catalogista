@@ -84,7 +84,10 @@ private struct ActionLabel: View {
         if let title {
             HStack(spacing: 6) {
                 if let systemImage { Image(systemName: systemImage) }
+                // A long folder name truncates rather than pushing the row past the window.
                 Text(title)
+                    .lineLimit(1)
+                    .frame(maxWidth: 180)
                 if let trailingImage {
                     Image(systemName: trailingImage)
                         .font(.caption.weight(.semibold))

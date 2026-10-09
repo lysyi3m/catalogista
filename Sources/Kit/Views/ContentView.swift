@@ -161,6 +161,12 @@ public struct ContentView: View {
             .collectionFailureAlert(editor)
     }
 
+    #if os(macOS)
+    /// Below this the record page's header no longer fits beside its cover, and the status bar's
+    /// count collides with the sync state.
+    private static let detailMinimumWidth: CGFloat = 620
+    #endif
+
     /// Onboarding has nothing to put in a sidebar, so the split view appears only with a token.
     @ViewBuilder
     private var root: some View {
@@ -170,8 +176,16 @@ public struct ContentView: View {
             } detail: {
                 detail
             }
+            #if os(macOS)
+            // The split view squeezes its columns rather than passing a column's minimum up to the
+            // window, so the window's own minimum makes room for the sidebar while it shows.
+            .frame(minWidth: isSidebarVisible ? Self.detailMinimumWidth + 220 : Self.detailMinimumWidth)
+            #endif
         } else {
             detail
+                #if os(macOS)
+                .frame(minWidth: Self.detailMinimumWidth)
+                #endif
         }
     }
 
