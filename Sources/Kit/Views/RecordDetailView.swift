@@ -24,10 +24,10 @@ struct RecordDetailView: View {
     /// edge. See `creditViewport(_:)`.
     @State private var viewportHeight: CGFloat = 0
     #if os(iOS)
-    /// Where the page's title ends and where the navigation bar ends, in the scroll view's space.
-    /// Until the title scrolls under the bar, the bar stays empty rather than repeat it.
-    @State private var titleBottom: CGFloat = .infinity
-    @State private var topInset: CGFloat = 0
+    /// Whether the page's title has scrolled under the navigation bar. Until it has, the bar stays
+    /// empty rather than repeat it.
+    @State private var isTitleUnderBar = false
+    @State private var titleTracking = TitleTracking()
     #endif
 
     private var detail: ReleaseDetailSnapshot? { loader?.snapshot }
@@ -51,7 +51,7 @@ struct RecordDetailView: View {
 
     private var navigationTitle: String {
         #if os(iOS)
-        titleBottom < topInset ? item.title : ""
+        isTitleUnderBar ? item.title : ""
         #else
         item.title
         #endif
@@ -101,7 +101,8 @@ struct RecordDetailView: View {
         .detailScrollEdge()
         #if os(iOS)
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, inset in
-            topInset = inset
+            titleTracking.topInset = inset
+            updateTitleUnderBar()
         }
         #endif
         .navigationTitle(navigationTitle)
@@ -194,11 +195,21 @@ struct RecordDetailView: View {
             styles: item.styles,
             onTitleBottomChange: { bottom in
                 #if os(iOS)
-                titleBottom = bottom
+                titleTracking.titleBottom = bottom
+                updateTitleUnderBar()
                 #endif
             }
         )
     }
+
+    #if os(iOS)
+    /// Changes view state only when the title crosses the bar. The positions change on every
+    /// scrolled frame, and stored as state they re-evaluated the whole page each time.
+    private func updateTitleUnderBar() {
+        let isUnder = titleTracking.titleBottom < titleTracking.topInset
+        if isUnder != isTitleUnderBar { isTitleUnderBar = isUnder }
+    }
+    #endif
 
     // MARK: - Tracklist
 
@@ -310,3 +321,12 @@ private struct TrackRow: View {
     #endif
     private static let supportingFont = Font.system(supportingTextStyle)
 }
+
+#if os(iOS)
+/// Where the page's title ends and where the navigation bar ends, in the scroll view's space. A
+/// class, so updating them on every scrolled frame does not invalidate the page.
+private final class TitleTracking {
+    var titleBottom: CGFloat = .infinity
+    var topInset: CGFloat = 0
+}
+#endif

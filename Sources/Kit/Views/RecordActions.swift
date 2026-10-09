@@ -21,12 +21,16 @@ struct FolderMenu: View {
                 \(Text(Image(systemName: "chevron.down")).font(.caption2.weight(.semibold)))
                 """)
                 .lineLimit(1)
+                // Keeps the icon and the chevron when a long folder name has to shorten.
+                .truncationMode(.middle)
                 .foregroundStyle(.tint)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
+        // As wide as the name needs and no wider than the column: a long folder name truncates
+        // rather than spreading over the next value in the Copy grid.
+        .fixedSize(horizontal: false, vertical: true)
         .disabled(isWorking)
         .accessibilityLabel("Folder: \(FolderPicker.name(of: folderID, among: folders))")
     }

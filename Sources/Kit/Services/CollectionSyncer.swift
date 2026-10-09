@@ -143,15 +143,16 @@ actor CollectionSyncer {
         // pages came in is not missing from it. Removed folders go only now, and never one a copy
         // still names. See `replaceFolders(_:keeping:)`.
         let folders = try await client.folders(user: identity.username)
+        // Names for the field values the pages carried. Required like the folders: a sync that
+        // kept old names after a failed request would still count as fresh. Fetched before
+        // anything is deleted, so a failure or a cancellation here leaves the cache as it was.
+        let fields = try await client.customFields(user: identity.username)
+        // Everything below deletes. A sync cancelled by now must leave the cache alone.
+        try Task.checkCancellation()
 
         let itemsRemoved = try await store.pruneItems(keeping: seenInstanceIDs)
         try await store.replaceFolders(folders, keeping: seenFolderIDs)
-        // Names for the field values the pages carried. Best effort: they only label values on
-        // the record page, so a failure keeps the names from the last sync rather than failing
-        // this one.
-        if let fields = try? await client.customFields(user: identity.username) {
-            try await store.replaceFields(fields)
-        }
+        try await store.replaceFields(fields)
         if rebuilding {
             try await store.pruneReleaseDetails(keeping: [])
             try await imageCache.removeAll()

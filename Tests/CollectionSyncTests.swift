@@ -23,6 +23,8 @@ struct CollectionSyncTests {
         nonisolated(unsafe) static var fieldsJSON: String?
         /// Each copy's `notes`, the values of those fields.
         nonisolated(unsafe) static var fieldValuesJSON = "[]"
+        /// How long the fields request takes, so a test can cancel while it is out.
+        nonisolated(unsafe) static var fieldsDelay: TimeInterval = 0
         private static let lock = NSLock()
 
         static func serve(
@@ -33,9 +35,11 @@ struct CollectionSyncTests {
             copiesIn folderID: Int = 1,
             foldersAfterPages: [(id: Int, name: String)]? = nil,
             fields: String? = "[]",
-            fieldValues: String = "[]"
+            fieldValues: String = "[]",
+            fieldsDelay: TimeInterval = 0
         ) {
             lock.withLock {
+                self.fieldsDelay = fieldsDelay
                 fieldsJSON = fields
                 fieldValuesJSON = fieldValues
                 releaseInstanceIDs = instanceIDs
@@ -56,6 +60,7 @@ struct CollectionSyncTests {
             let body: String
             var status = 200
             if path.hasSuffix("/collection/fields") {
+                Thread.sleep(forTimeInterval: Self.lock.withLock { Self.fieldsDelay })
                 if let fields = Self.lock.withLock({ Self.fieldsJSON }) {
                     body = #"{"fields":\#(fields)}"#
                 } else {
@@ -138,16 +143,40 @@ struct CollectionSyncTests {
         #expect(try await store.item(instanceID: 1)?.fieldValues == [FieldValue(fieldID: 1, value: "Very Good Plus (VG+)")])
     }
 
-    @Test("A sync whose fields request fails still succeeds and keeps the names it had")
-    func failedFieldsKeepPreviousNames() async throws {
+    @Test("A sync whose fields request fails fails before it deletes anything")
+    func failedFieldsFailTheSync() async throws {
         let store = try makeStore()
-        try await store.replaceFields([CustomField(id: 1, name: "Media", type: "dropdown", position: 1)])
+        let syncer = makeSyncer(store: store)
+        StubProtocol.serve(
+            instanceIDs: [1, 2],
+            claimingItems: 2,
+            fields: #"[{"name":"Media","id":1,"position":1,"type":"dropdown","public":true}]"#
+        )
+        try await syncer.reconcile()
 
+        // Copy 2 is gone on Discogs, but the sync cannot finish, so it must not prune.
         StubProtocol.serve(instanceIDs: [1], claimingItems: 1, fields: nil)
-        try await makeSyncer(store: store).reconcile()
+        await #expect(throws: (any Error).self) { try await syncer.reconcile() }
 
-        #expect(try await store.itemCount() == 1)
+        #expect(try await store.itemCount() == 2, "nothing is deleted by a sync that failed")
         #expect(try await store.fields().map(\.name) == ["Media"])
+    }
+
+    @Test("A sync cancelled while the fields request is out fails before it deletes anything")
+    func cancelledDuringFieldsDeletesNothing() async throws {
+        let store = try makeStore()
+        let syncer = makeSyncer(store: store)
+        StubProtocol.serve(instanceIDs: [1, 2], claimingItems: 2)
+        try await syncer.reconcile()
+
+        // Copy 2 is gone on Discogs; the fields request is the last one out before pruning.
+        StubProtocol.serve(instanceIDs: [1], claimingItems: 1, fieldsDelay: 0.5)
+        let task = Task { try await syncer.reconcile(rebuilding: true) }
+        try await Task.sleep(for: .milliseconds(250))
+        task.cancel()
+
+        await #expect(throws: (any Error).self) { try await task.value }
+        #expect(try await store.itemCount() == 2, "a cancelled sync must not prune")
     }
 
     @Test("Reconciling hands back the covers to fetch rather than waiting for them")
