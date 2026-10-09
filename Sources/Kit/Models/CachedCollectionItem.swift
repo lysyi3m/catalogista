@@ -171,7 +171,7 @@ final class CachedCollectionItem {
     ///
     /// Discogs serves the thumb at 150px and quality 40, which the grid draws at up to 260pt —
     /// three times its size on a Retina display. `cover_image` is 600px at quality 90 and costs
-    /// about 20 KB, so it is worth using everywhere the art is more than a row icon.
+    /// about 100 KB, so it is worth using everywhere the art is more than a row icon.
     ///
     /// The kind follows the URL: caching a 150px thumb in the cover slot would fix this release's
     /// cover as a thumb for as long as its URL stands, and nothing would replace it.

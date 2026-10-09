@@ -51,7 +51,7 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
   rate limiter). `swift test --package-path DiscogsKit` runs its suite.
 - `CatalogistaKit` (`Sources/Kit`): SwiftData cache, image cache, services, and the SwiftUI
   feature layer. The views live here too, so only `AppServices` and the root view need to be
-  public and the tests can run unhosted.
+  public and the tests can run unhosted. This overrides the ground rule that `*Kit` is UI-free.
 - SwiftData for the metadata cache; on-disk image cache. No backend, no iCloud.
 
 ## Discogs API
@@ -62,8 +62,8 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
   reads the `X-Discogs-Ratelimit*` headers, keeps a safety margin, and backs off on 429.
 - Cover art is exempt: the image CDN returns no rate-limit headers and does not consume the
   budget, so images are bounded by their own concurrency cap instead.
-- A copy you own is an **instance** (`instance_id`) of a `release_id` in a `folder_id`. The
-  remove flow keys off `instance_id`, not `release_id`.
+- A copy you own is an **instance** (`instance_id`) of a `release_id` in a `folder_id`. Removal
+  and moves key off `instance_id`, not `release_id`.
 - **The API Terms of Use require two notices.** The affiliation notice
   (`DiscogsNotice.affiliation`) appears in Settings ▸ About, on the setup screen and in the
   README. `DiscogsCredit` ("Data provided by Discogs." and a "View ↗" link to the
@@ -80,12 +80,13 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
   Uncategorized is pinned first; the rest sort by name.
 - **Record** — an item in the collection. Counts, empty states, `Add Record`.
 - **Release** — the edition on Discogs. Search and the add confirmation.
-- **Copy** — the instance the user owns. Removal flows.
+- **Copy** — the instance the user owns. Removal and move flows.
 
 Never "pressing": the app holds CDs as well as vinyl. Never "album": wrong for the singles and
-EPs Discogs is full of. On the record page the table beside the cover (label, catalogue number,
-format, country, release date, genres and styles) is **Edition**; the section about the copy itself (its folder,
-when it was added, and the owner's custom fields such as media and sleeve condition) is **Copy**.
+EPs Discogs is full of. On the record page the facts under the title (label, catalog number,
+format, country, release date, genres and styles) are the **Edition**; the section about the copy
+itself (its folder, when it was added, and the owner's custom fields such as media and sleeve
+condition) is **Copy**.
 
 ## Caching
 
@@ -94,10 +95,10 @@ when it was added, and the owner's custom fields such as media and sleeve condit
   that age, a record detail is fetched again, and each image records its source URL and is
   fetched again when that URL changes. Offline, the cache stays on screen with its age shown:
   the collection's in the status line, a stale record's details on the record page.
-- Cache images on disk, keyed by release id and size. The grid and the record page both draw
-  `cover_image` (600px, quality 90); the 150px thumb is a fallback and a row icon. A file is
-  fetched again only when its URL changes, never because it is old. After each complete sync,
-  art and release details of releases no longer in the collection are deleted.
+- Cache images on disk, keyed by release id and kind (thumb or cover). The grid and the record
+  page both draw `cover_image` (600px, quality 90); the 150px thumb is a fallback and a row icon.
+  A file is fetched again only when its URL changes, never because it is old. After each
+  complete sync, art and release details of releases no longer in the collection are deleted.
 - SwiftData holds every collection item so the collection is browsable offline.
 - Cover art lives in Application Support, not Caches, so the system cannot evict it.
 

@@ -195,7 +195,7 @@ struct AddRecordView: View {
     #endif
 
     /// The release laid out the way its record page will show it, so the edition can be checked
-    /// before it is added, and the folder it goes into.
+    /// before it is added, then the folder to add it to.
     ///
     /// Search carries a year but no release date, so Released shows the year until the record page
     /// fetches the release.

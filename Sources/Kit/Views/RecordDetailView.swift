@@ -24,8 +24,8 @@ struct RecordDetailView: View {
     /// edge. See `creditViewport(_:)`.
     @State private var viewportHeight: CGFloat = 0
     #if os(iOS)
-    /// Whether the title in the page has scrolled under the navigation bar. Until it does, the bar
-    /// stays empty rather than repeat it.
+    /// Where the page's title ends and where the navigation bar ends, in the scroll view's space.
+    /// Until the title scrolls under the bar, the bar stays empty rather than repeat it.
     @State private var titleBottom: CGFloat = .infinity
     @State private var topInset: CGFloat = 0
     #endif

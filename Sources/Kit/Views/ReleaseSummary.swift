@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A release's cover, title and artist, with its edition beside them as a two-column table, the
-/// way discogs.com lays out a release.
+/// A release's cover, title, artist and edition. On the Mac the edition is a two-column table
+/// beside the cover, the way discogs.com lays out a release; on iOS it follows the cover.
 ///
 /// Used by the record page and by the add confirmation, so a release looks the same before and
 /// after it is added.

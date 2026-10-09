@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Collection sync", .serialized)
 struct CollectionSyncTests {
-    /// Answers the three calls a sync makes. The collection page's `releases` array and its
+    /// Answers every call a sync makes. The collection page's `releases` array and its
     /// `pagination.items` are set independently, so a response can claim more than it sends.
     final class StubProtocol: URLProtocol, @unchecked Sendable {
         nonisolated(unsafe) static var releaseInstanceIDs: [Int] = []
