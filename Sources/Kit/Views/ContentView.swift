@@ -1,6 +1,9 @@
 import DiscogsKit
 import SwiftData
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 public struct ContentView: View {
     @Environment(AppServices.self) private var services
