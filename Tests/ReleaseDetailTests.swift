@@ -58,6 +58,28 @@ struct ReleaseDetailTests {
         #expect(loader.snapshot?.title == "Second", "a loaded page must not stay on its first copy")
     }
 
+    @Test("A record opened before shows its cached details from the start, with no request")
+    @MainActor
+    func cachedCopyShowsAtOnce() async throws {
+        let container = try AppServices.makeModelContainer(inMemory: true)
+        // No token: a load that tried to fetch would fail rather than keep the cached copy.
+        let services = AppServices(
+            modelContainer: container,
+            tokenStore: TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)"),
+            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString))
+        )
+        try await services.store.upsertReleaseDetail(makeRelease(title: "Cached"))
+
+        // The record page reads on the main context, which sees what the store saved.
+        let cached = try #require(ReleaseDetailLoader.cachedDetail(releaseID: 1373891, in: container.mainContext))
+        let loader = ReleaseDetailLoader(services: services, cached: cached)
+        #expect(loader.snapshot?.title == "Cached", "shown before any load runs")
+
+        await loader.load(releaseID: 1373891)
+        #expect(loader.state == .loaded(cached), "a fresh copy is kept without asking Discogs")
+        #expect(ReleaseDetailLoader.cachedDetail(releaseID: 42, in: container.mainContext) == nil)
+    }
+
     @Test("A stale copy is on screen while its refresh is still out")
     @MainActor
     func staleCopyShowsDuringRefresh() async throws {

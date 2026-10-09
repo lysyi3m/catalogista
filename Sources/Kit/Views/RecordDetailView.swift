@@ -63,6 +63,15 @@ struct RecordDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        // Before the first frame, unlike `task`: a record opened before shows its details at once.
+        .onAppear {
+            if loader == nil {
+                loader = ReleaseDetailLoader(
+                    services: services,
+                    cached: ReleaseDetailLoader.cachedDetail(releaseID: item.releaseID, in: item.modelContext)
+                )
+            }
+        }
         .task {
             editor = editor ?? services.makeEditor()
             let loader = loader ?? ReleaseDetailLoader(services: services)
