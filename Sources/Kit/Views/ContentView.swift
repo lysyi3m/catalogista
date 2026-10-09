@@ -20,7 +20,6 @@ public struct ContentView: View {
     #if os(iOS)
     /// Room under the folder list, which pins its credit to the bottom edge. See `creditSlack(_:)`.
     @State private var sidebarCreditSlack: CGFloat = 0
-    @State private var sidebarCreditSpacing = ListCreditSpacing()
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
@@ -224,9 +223,9 @@ public struct ContentView: View {
             DiscogsCredit(
                 destination: DiscogsNotice.collectionURL(username: services.accountUsername),
                 slack: sidebarCreditSlack,
-                listTrailing: sidebarCreditSpacing.trailing
+                listOffset: DiscogsCredit.standardListOffset
             )
-            .creditRow(sidebarCreditSpacing)
+            .creditRow()
             // Collapsed to a stack, the sidebar is an inset-grouped list, which draws a row's
             // platter even when told clear; with the slack above the credit that was an empty
             // white card. The list's own background hides it. The iPad sidebar has no platter and
@@ -239,7 +238,6 @@ public struct ContentView: View {
         #if os(iOS)
         .contentMargins(.bottom, 0, for: .scrollContent)
         .creditSlack($sidebarCreditSlack)
-        .listCreditSpacing(sidebarCreditSpacing)
         #endif
         #if os(macOS)
         .navigationSplitViewColumnWidth(min: 180, ideal: 220)

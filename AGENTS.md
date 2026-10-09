@@ -69,8 +69,8 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
   README. `DiscogsCredit` ("Data provided by Discogs." and a "View ↗" link to the
   discogs.com page that holds the data, on one line) ends every view of Discogs data. It owns the space
   around it, so place it flush against the content; in a list, make it the last row with
-  `.creditRow(spacing)` and put `.listCreditSpacing(spacing)` on the list, so the list's own
-  trailing space is measured and the credit ends at the same height as on every other screen. A new screen of Discogs data needs its own credit.
+  `.creditRow()` and pass `DiscogsCredit.standardListOffset` as `listOffset`, so the credit ends
+  at the same height as on every other screen. A new screen of Discogs data needs its own credit.
 
 ## Terminology
 
