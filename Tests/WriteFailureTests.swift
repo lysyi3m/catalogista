@@ -328,6 +328,48 @@ struct WriteFailureTests {
         #expect(editor.failure?.retry != nil, "a move is safe to repeat")
     }
 
+    @Test("A move that cannot be confirmed goes back to its folder, and its retry asks Discogs again")
+    func unconfirmedMoveRetrySendsRequest() async throws {
+        // The move answers 503 and the confirming sync fails too: the outcome stays unknown.
+        FlakyProtocol.reset(failureStatus: 503, writesToFail: .max)
+        FlakyProtocol.failReads = true
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        let editor = services.makeEditor()
+        #expect(await editor.move(instanceID: 111, toFolderID: 5) == false)
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 1, "back to the last confirmed folder")
+        let retry = try #require(editor.failure?.retry)
+
+        FlakyProtocol.reset(writesToFail: 0)
+        await retry()
+        #expect(FlakyProtocol.lastWritePath != nil, "the retry must reach Discogs, not trust the cache")
+        #expect(try await services.store.item(instanceID: 111)?.folderID == 5)
+    }
+
+    @Test("A change to a copy another editor is still changing is refused, with a retry")
+    func overlappingChangeIsRefused() async throws {
+        FlakyProtocol.reset(writesToFail: 0)
+
+        let (services, tokenStore) = try makeServices()
+        defer { try? tokenStore.delete() }
+        try await services.store.upsert([try makeItem(instanceID: 111)])
+
+        // Another editor's move of this copy is still under way.
+        #expect(services.claimCopy(111))
+        let editor = services.makeEditor()
+        #expect(await editor.remove(instanceID: 111) == false)
+        #expect(try await services.store.itemCount() == 1, "the cache is left alone")
+        #expect(FlakyProtocol.writeAttempts == 0, "nothing is sent while the copy is busy")
+        let retry = try #require(editor.failure?.retry)
+
+        services.releaseCopy(111)
+        await retry()
+        #expect(try await services.store.itemCount() == 0)
+    }
+
     @Test("A rejected removal offers a retry that actually removes the copy")
     func failedRemoveRetries() async throws {
         FlakyProtocol.reset()

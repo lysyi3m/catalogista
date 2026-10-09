@@ -32,6 +32,16 @@ public final class AppServices {
 
     func noteFolderChange() { folderRevision += 1 }
 
+    /// Copies with a move or removal under way. Every editor claims a copy here first, so a removal
+    /// cannot start from the grid while the record page is still moving that copy, acting on a
+    /// folder Discogs has not confirmed.
+    private var copiesInFlight: Set<Int> = []
+
+    /// False when another change to the copy is still under way.
+    func claimCopy(_ instanceID: Int) -> Bool { copiesInFlight.insert(instanceID).inserted }
+
+    func releaseCopy(_ instanceID: Int) { copiesInFlight.remove(instanceID) }
+
     /// Non-nil once a token is available. First-run setup sets it; until then the app is in its
     /// no-token state and browses whatever the cache already holds.
     private(set) var client: DiscogsClient?

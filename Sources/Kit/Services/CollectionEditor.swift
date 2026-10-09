@@ -23,6 +23,15 @@ final class CollectionEditor {
         /// Absent when retrying could do damage — an unconfirmed write may already have been
         /// applied, and repeating it would add a second copy.
         let retry: (@MainActor () async -> Void)?
+
+        /// Another move or removal of the copy has not finished yet.
+        static func copyBusy(_ title: String, retry: @escaping @MainActor () async -> Void) -> Failure {
+            Failure(
+                title: "Unable to Change “\(title)”",
+                message: "A change to this copy is still under way. Try again in a moment.",
+                retry: retry
+            )
+        }
     }
 
     /// The same failure as a status line, for the surfaces that show sync state alongside it.
@@ -156,6 +165,11 @@ final class CollectionEditor {
             return false
         }
         guard let snapshot else { return false }
+        guard services.claimCopy(instanceID) else {
+            failure = .copyBusy(snapshot.title, retry: { [weak self] in _ = await self?.remove(instanceID: instanceID) })
+            return false
+        }
+        defer { services.releaseCopy(instanceID) }
 
         do {
             try await services.store.deleteItem(instanceID: instanceID)
@@ -218,13 +232,17 @@ final class CollectionEditor {
         }
         guard let snapshot else { return false }
         guard snapshot.folderID != folderID else { return true }
+        let retry: @MainActor () async -> Void = { [weak self] in
+            _ = await self?.move(instanceID: instanceID, toFolderID: folderID)
+        }
+        guard services.claimCopy(instanceID) else {
+            failure = .copyBusy(snapshot.title, retry: retry)
+            return false
+        }
+        defer { services.releaseCopy(instanceID) }
 
         func failed(_ error: any Error, title: String) {
-            failure = Failure(
-                title: title,
-                message: error.localizedDescription,
-                retry: { [weak self] in _ = await self?.move(instanceID: instanceID, toFolderID: folderID) }
-            )
+            failure = Failure(title: title, message: error.localizedDescription, retry: retry)
         }
 
         do {
@@ -262,10 +280,14 @@ final class CollectionEditor {
             // Settled first: the sync below decides the folder, and must be free to change it.
             await services.store.settleWrites([instanceID])
             guard await services.syncController.syncAfterWrite() else {
+                // Unconfirmed, so back to the last folder Discogs confirmed. Left in the new one, a
+                // retry would find the copy already there and succeed without asking Discogs.
+                try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
+                services.noteFolderChange()
                 failure = Failure(
                     title: "Unable to Confirm Move",
-                    message: "“\(snapshot.title)” may not have moved. Sync your collection to confirm.",
-                    retry: { [weak self] in _ = await self?.move(instanceID: instanceID, toFolderID: folderID) }
+                    message: "“\(snapshot.title)” may have moved. Sync your collection to confirm.",
+                    retry: retry
                 )
                 return false
             }
