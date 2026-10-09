@@ -1,5 +1,6 @@
 import DiscogsKit
 import Foundation
+import SwiftData
 
 /// Loads a release detail cache-first, fetching from Discogs on a miss or once the cached copy
 /// passes `Freshness.maximumAge`.
@@ -36,9 +37,26 @@ final class ReleaseDetailLoader {
     /// The clock freshness is judged by. Injectable so tests can age a copy without waiting.
     private let now: () -> Date
 
-    init(services: AppServices, now: @escaping () -> Date = Date.init) {
+    /// - Parameter cached: the copy already on this device, shown from the start. See
+    ///   `cachedDetail(releaseID:in:)`.
+    init(services: AppServices, cached: ReleaseDetailSnapshot? = nil, now: @escaping () -> Date = Date.init) {
         self.services = services
         self.now = now
+        if let cached { state = .loaded(cached) }
+    }
+
+    /// The cached copy of a release, read on `context` without leaving the caller's thread.
+    ///
+    /// A record page reads it on the main context before its first frame. A read through
+    /// `CollectionStore` hops to the store's actor and lands a frame or two later, so every open
+    /// flashed "Loading details…" and the tracklist popped in, cached copy or not.
+    static func cachedDetail(releaseID: Int, in context: ModelContext?) -> ReleaseDetailSnapshot? {
+        guard let context else { return nil }
+        var descriptor = FetchDescriptor<CachedReleaseDetail>(
+            predicate: #Predicate { $0.releaseID == releaseID }
+        )
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first?.snapshot
     }
 
     /// Shows the release, fetching it when there is no copy or the copy is past
