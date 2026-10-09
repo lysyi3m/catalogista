@@ -49,9 +49,9 @@ enum DiscogsNotice {
 struct DiscogsCredit: View {
     let destination: URL
     var slack: CGFloat = 0
-    /// Space a list keeps after its last row. The credit moves down by it within its own padding,
-    /// so it ends as far from the bottom edge in a list as anywhere else. See `ListCreditSpacing`.
-    var listTrailing: CGFloat = 0
+    /// Moves the credit down within its own padding, to line it up with the credit at the end of a
+    /// grid or a page. See `standardListOffset`.
+    var listOffset: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,52 +83,9 @@ struct DiscogsCredit: View {
         .font(.caption)
         .frame(maxWidth: .infinity)
         // Moved, not trimmed: the row keeps its height, so the list's layout does not change and
-        // cannot feed back into the measurement.
-        .padding(.top, 24 + listTrailing)
-        .padding(.bottom, 24 - listTrailing)
-    }
-}
-
-/// Measures the space a `List` keeps after its last row.
-///
-/// The macOS list keeps about 14 pt there whatever its content margins say, so a credit in its
-/// last row ends higher than one at the end of a grid or a page, and jumps when switching between
-/// them. Measured rather than assumed, since the list style decides it: the content's bottom edge
-/// minus the credit row's, both in the scroll view's space. Taken only while the list is at rest,
-/// because the two readings arrive separately and would disagree mid-scroll.
-@MainActor
-@Observable
-final class ListCreditSpacing {
-    private(set) var trailing: CGFloat = 0
-    @ObservationIgnored private var rowBottom: CGFloat?
-    @ObservationIgnored private var contentBottom: CGFloat?
-    @ObservationIgnored private var isScrolling = false
-
-    func rowMoved(bottom: CGFloat) {
-        rowBottom = bottom
-        settle()
-    }
-
-    func contentMoved(bottom: CGFloat) {
-        contentBottom = bottom
-        settle()
-    }
-
-    func scrollingChanged(_ scrolling: Bool) {
-        isScrolling = scrolling
-        settle()
-    }
-
-    /// Applying a value moves the credit within its row and leaves every size alone, so the reading
-    /// stays put. While rows first lay out the two readings drift apart and give passing values
-    /// (−1460, 95, 175 pt measured), so only readings within the credit's own padding count, and
-    /// a new value is applied after the layout pass: changing layout from within a layout pass
-    /// made AppKit stop the app.
-    private func settle() {
-        guard !isScrolling, let rowBottom, let contentBottom else { return }
-        let measured = (contentBottom - rowBottom).rounded()
-        guard (0...24).contains(measured), measured != trailing else { return }
-        Task { @MainActor in self.trailing = measured }
+        // cannot feed back into the slack measurement.
+        .padding(.top, 24 + listOffset)
+        .padding(.bottom, 24 - listOffset)
     }
 }
 
@@ -153,40 +110,38 @@ extension View {
     /// Content given at least this height, with a flexible space before the credit, keeps the
     /// credit on the bottom edge until the content is tall enough to scroll. For scroll views whose
     /// content can be stretched; a `List` cannot, and uses `creditSlack(_:)`.
+    ///
+    /// The view's own size, not its scroll geometry. A macOS window restored at launch grows to its
+    /// saved size without a scroll-geometry update, which left the credit partway up the window.
+    /// The size already ends at the toolbar and the bottom bar, which the scroll view still reports
+    /// as insets; subtracting them would count the bars twice.
     func creditViewport(_ height: Binding<CGFloat>) -> some View {
-        onScrollGeometryChange(for: CGFloat.self) { geometry in
-            // The container already ends at the toolbar and the bottom bar, yet the scroll view
-            // still reports both as insets, on macOS and iOS alike. Subtracting them counts the
-            // bars twice, and the credit stops short of the bottom edge.
-            geometry.containerSize.height
-        } action: { _, visible in
+        onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visible in
             height.wrappedValue = max(0, visible)
         }
     }
 
     /// Places a credit as the last row of a list. A section footer adds insets of its own, which
-    /// would leave more space below the credit than above it. `spacing` measures the row; pass the
-    /// same object to the list's `listCreditSpacing(_:)` and its `trailing` to the credit.
-    func creditRow(_ spacing: ListCreditSpacing? = nil) -> some View {
+    /// would leave more space below the credit than above it.
+    func creditRow() -> some View {
         listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).maxY } action: {
-                spacing?.rowMoved(bottom: $0)
-            }
     }
+}
 
-    /// The list's half of `ListCreditSpacing`: where its content ends, and whether it is scrolling.
-    func listCreditSpacing(_ spacing: ListCreditSpacing) -> some View {
-        onScrollGeometryChange(for: CGFloat.self) { geometry in
-            // The content's bottom edge in the same space as the row's frame.
-            geometry.contentSize.height - geometry.contentOffset.y
-        } action: { _, bottom in
-            spacing.contentMoved(bottom: bottom)
-        }
-        .onScrollPhaseChange { _, phase in
-            spacing.scrollingChanged(phase != .idle)
-        }
+extension DiscogsCredit {
+    /// Lines up a list's credit with the one at the end of a grid or a page, checked side by side:
+    /// the macOS inset list needs 10 pt, an iOS list none. The add sheet's results pass none.
+    ///
+    /// A constant, not a live measurement: the row and the content report their positions in
+    /// separate callbacks, a frame apart while the list moves, so a measured value jitters.
+    static var standardListOffset: CGFloat {
+        #if os(macOS)
+        10
+        #else
+        0
+        #endif
     }
 }
 

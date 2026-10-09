@@ -29,7 +29,6 @@ struct CollectionView: View {
     /// edge while the content is short. See `creditSlack(_:)` and `creditViewport(_:)`.
     @State private var creditSlack: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
-    @State private var listCreditSpacing = ListCreditSpacing()
 
     init(
         folderID: Int,
@@ -168,13 +167,12 @@ struct CollectionView: View {
                             .rowHoverHighlight(id: item.id, hovered: $hoveredID)
                     }
                 }
-                credit(slack: creditSlack, listTrailing: listCreditSpacing.trailing)
-                    .creditRow(listCreditSpacing)
+                credit(slack: creditSlack, listOffset: DiscogsCredit.standardListOffset)
+                    .creditRow()
             }
             // The list's own trailing margin would add to the space the credit brings.
             .contentMargins(.bottom, 0, for: .scrollContent)
             .creditSlack($creditSlack)
-            .listCreditSpacing(listCreditSpacing)
             .detailScrollEdge()
             #if os(macOS)
             .listStyle(.inset)
@@ -224,11 +222,11 @@ struct CollectionView: View {
     }
 
     /// Only the list passes slack: the grid and the empty folder fill the window themselves.
-    private func credit(slack: CGFloat = 0, listTrailing: CGFloat = 0) -> some View {
+    private func credit(slack: CGFloat = 0, listOffset: CGFloat = 0) -> some View {
         DiscogsCredit(
             destination: DiscogsNotice.collectionURL(username: services.accountUsername, folderID: folderID),
             slack: slack,
-            listTrailing: listTrailing
+            listOffset: listOffset
         )
     }
 
