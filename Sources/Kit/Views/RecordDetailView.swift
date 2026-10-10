@@ -1,7 +1,8 @@
+import DiscogsKit
 import SwiftData
 import SwiftUI
 
-/// One record: cover, the facts that identify the edition, and its tracklist on request.
+/// One record: cover and edition, this copy's details, the tracklist and the release notes.
 ///
 /// The collection snapshot holds what identifies an edition — title, artist, label and catalog
 /// number — so the page has content the moment it opens. One release fetch on open adds the
@@ -12,6 +13,8 @@ struct RecordDetailView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
     @Query private var cachedFolders: [CachedFolder]
+    @Query(sort: [SortDescriptor(\CachedField.position), SortDescriptor(\CachedField.id)])
+    private var cachedFields: [CachedField]
 
     @State private var loader: ReleaseDetailLoader?
     @State private var editor: CollectionEditor?
@@ -20,6 +23,12 @@ struct RecordDetailView: View {
     /// The visible height. A short page is stretched to it, which keeps the credit on the bottom
     /// edge. See `creditViewport(_:)`.
     @State private var viewportHeight: CGFloat = 0
+    #if os(iOS)
+    /// Whether the page's title has scrolled under the navigation bar. Until it has, the bar stays
+    /// empty rather than repeat it.
+    @State private var isTitleUnderBar = false
+    @State private var titleTracking = TitleTracking()
+    #endif
 
     private var detail: ReleaseDetailSnapshot? { loader?.snapshot }
 
@@ -31,12 +40,42 @@ struct RecordDetailView: View {
         #endif
     }
 
+    /// On iOS the navigation bar already sets the cover apart from the top edge.
+    private var topPadding: CGFloat {
+        #if os(macOS)
+        28
+        #else
+        4
+        #endif
+    }
+
+    private var navigationTitle: String {
+        #if os(iOS)
+        isTitleUnderBar ? item.title : ""
+        #else
+        item.title
+        #endif
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 28) {
                     header
-                    facts
+                    CopyFields(
+                        dateAdded: item.dateAdded,
+                        values: item.fieldValues,
+                        fields: cachedFields.map(\.field)
+                    ) {
+                        FolderMenu(
+                            folderID: item.folderID,
+                            folders: CollectionFolders.destinations(cachedFolders.map(\.snapshot)),
+                            isWorking: editor?.isWorking ?? true,
+                            onMove: { folderID in
+                                Task { await editor?.move(instanceID: item.instanceID, toFolderID: folderID) }
+                            }
+                        )
+                    }
                     tracklist
                     notes
                     if let staleSince = loader?.staleSince {
@@ -54,12 +93,28 @@ struct RecordDetailView: View {
             }
             .frame(maxWidth: 780, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
-            .padding([.horizontal, .top], pagePadding)
+            .padding(.horizontal, pagePadding)
+            .padding(.top, topPadding)
             .frame(minHeight: viewportHeight)
         }
         .creditViewport($viewportHeight)
         .detailScrollEdge()
-        .navigationTitle(item.title)
+        #if os(iOS)
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, inset in
+            titleTracking.topInset = inset
+            updateTitleUnderBar()
+        }
+        #endif
+        .navigationTitle(navigationTitle)
+        .toolbar {
+            ToolbarItem {
+                RecordMenu(
+                    discogsURL: discogsURL,
+                    isWorking: editor?.isWorking ?? true,
+                    onRequestRemove: { isConfirmingRemoval = true }
+                )
+            }
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -100,21 +155,6 @@ struct RecordDetailView: View {
         .collectionFailureAlert(editor)
     }
 
-    // MARK: - Actions
-
-    private var actions: some View {
-        RecordActionRow(
-            folderID: item.folderID,
-            folders: CollectionFolders.destinations(cachedFolders.map(\.snapshot)),
-            discogsURL: discogsURL,
-            isWorking: editor?.isWorking ?? true,
-            onMove: { folderID in
-                Task { await editor?.move(instanceID: item.instanceID, toFolderID: folderID) }
-            },
-            onRequestRemove: { isConfirmingRemoval = true }
-        )
-    }
-
     private var discogsURL: URL {
         detail?.discogsURL.flatMap(URL.init(string:)) ?? DiscogsNotice.releaseURL(id: item.releaseID)
     }
@@ -143,27 +183,33 @@ struct RecordDetailView: View {
             cover: coverSource,
             title: item.title,
             artist: item.artistName,
-            subtitle: ReleaseRow.details([
-                item.year.map(String.init),
-                item.formatSummary,
+            facts: Fact.present([
+                (Fact.label, item.labelName),
+                (Fact.catalogNumber, item.catalogNumber),
+                (Fact.format, item.formatSummary),
+                (Fact.country, detail?.country),
+                // The full date once the release is fetched; until then the year the copy carries.
+                (Fact.released, detail?.releasedDisplay ?? item.year.map(String.init)),
             ]),
-            tags: item.genres + item.styles
-        ) {
-            actions
-        }
+            genres: item.genres,
+            styles: item.styles,
+            onTitleBottomChange: { bottom in
+                #if os(iOS)
+                titleTracking.titleBottom = bottom
+                updateTitleUnderBar()
+                #endif
+            }
+        )
     }
 
-    // MARK: - Facts
-
-    private var facts: some View {
-        EditionFacts([
-            (EditionFacts.label, item.labelName),
-            (EditionFacts.catalogNumber, item.catalogNumber),
-            (EditionFacts.released, detail?.releasedDisplay),
-            (EditionFacts.country, detail?.country),
-            (EditionFacts.added, item.dateAdded?.formatted(date: .abbreviated, time: .omitted)),
-        ])
+    #if os(iOS)
+    /// Changes view state only when the title crosses the bar. The positions change on every
+    /// scrolled frame, and stored as state they re-evaluated the whole page each time.
+    private func updateTitleUnderBar() {
+        let isUnder = titleTracking.titleBottom < titleTracking.topInset
+        if isUnder != isTitleUnderBar { isTitleUnderBar = isUnder }
     }
+    #endif
 
     // MARK: - Tracklist
 
@@ -174,16 +220,20 @@ struct RecordDetailView: View {
                 .padding(.top, 8)
         } label: {
             HStack(spacing: 8) {
-                Text("Tracklist").font(.headline)
+                Text("Tracklist").font(.pageHeading)
                 if let count = detail?.playableTracks.count {
                     Text("\(count)")
-                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
                 if loader?.state == .loading {
                     ProgressView().controlSize(.small)
                 }
             }
+            #if os(iOS)
+            // The whole row toggles, not only the words and the chevron at either end.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            #endif
         }
         #if os(iOS)
         // Left to the accent colour, the section heading reads as a link rather than a heading.
@@ -194,7 +244,8 @@ struct RecordDetailView: View {
     @ViewBuilder
     private var notes: some View {
         if let notes = detail?.notes, !notes.isEmpty {
-            PageSection("Notes") {
+            // Named apart from a custom field the owner may also have called Notes, in Copy.
+            PageSection("Release Notes") {
                 NotesText(notes: DiscogsMarkup.attributed(notes))
             }
         }
@@ -214,18 +265,16 @@ struct RecordDetailView: View {
             }
         case .loaded:
             Text("No tracklist on Discogs")
-                .font(.callout)
                 .foregroundStyle(.secondary)
         case .failed(let message):
             VStack(alignment: .leading, spacing: 8) {
-                Text(message).font(.callout).foregroundStyle(.red)
+                Text(message).foregroundStyle(.red)
                 Button("Try Again") {
                     Task { await loader?.load(releaseID: item.releaseID) }
                 }
             }
         case .loading, nil:
             Text("Loading details…")
-                .font(.callout)
                 .foregroundStyle(.secondary)
         }
     }
@@ -233,28 +282,51 @@ struct RecordDetailView: View {
 
 private struct TrackRow: View {
     let track: CachedTrack
+    /// Grows with the text size, so a position such as "A10" stays on one line.
+    @ScaledMetric(relativeTo: Self.supportingTextStyle) private var positionWidth: CGFloat = 44
 
     var body: some View {
         if track.isTrack {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(track.position)
-                    .font(.callout.monospaced())
+                    .font(Self.supportingFont)
                     .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .leading)
-                Text(track.title).font(.callout)
+                    .frame(width: positionWidth, alignment: .leading)
+                Text(track.title)
+                    .textSelection(.enabled)
                 Spacer(minLength: 8)
                 if !track.duration.isEmpty {
+                    // Monospaced digits keep the column's right edge straight.
                     Text(track.duration)
-                        .font(.callout.monospacedDigit())
+                        .font(Self.supportingFont)
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 6)
         } else {
             Text(track.title)
-                .font(.subheadline.weight(.semibold))
+                .fontWeight(.semibold)
+                .textSelection(.enabled)
                 .padding(.top, 12)
                 .padding(.bottom, 4)
         }
     }
+
+    #if os(iOS)
+    /// One step under the title: at body size a position and a duration compete with it.
+    private static let supportingTextStyle = Font.TextStyle.subheadline
+    #else
+    private static let supportingTextStyle = Font.TextStyle.body
+    #endif
+    private static let supportingFont = Font.system(supportingTextStyle)
 }
+
+#if os(iOS)
+/// Where the page's title ends and where the navigation bar ends, in the scroll view's space. A
+/// class, so updating them on every scrolled frame does not invalidate the page.
+private final class TitleTracking {
+    var titleBottom: CGFloat = .infinity
+    var topInset: CGFloat = 0
+}
+#endif

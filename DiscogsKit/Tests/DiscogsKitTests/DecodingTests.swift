@@ -65,6 +65,35 @@ struct DecodingTests {
         #expect(item.basicInformation.labels.first?.catno == "SRK 6095")
     }
 
+    @Test("A copy's custom field values decode, and a copy with none decodes as empty")
+    func fieldValues() throws {
+        let page = try decode(CollectionPage.self, from: Self.collectionJSON)
+        #expect(page.releases[0].fieldValues.isEmpty, "the sample copy has no fields filled in")
+
+        let json = Self.collectionJSON.replacingOccurrences(
+            of: "\"folder_id\": 1,",
+            with: #""folder_id": 1, "notes": [{ "field_id": 1, "value": "Near Mint (NM or M-)" }, { "field_id": 3, "value": "Bought in Leeds" }],"#
+        )
+        let item = try decode(CollectionPage.self, from: json).releases[0]
+        #expect(item.fieldValues == [
+            FieldValue(fieldID: 1, value: "Near Mint (NM or M-)"),
+            FieldValue(fieldID: 3, value: "Bought in Leeds"),
+        ])
+    }
+
+    @Test("Custom field definitions decode with their type and order")
+    func customFields() throws {
+        let list = try decode(CustomFieldList.self, from: """
+        { "fields": [
+          { "name": "Media", "options": ["Mint (M)"], "id": 1, "position": 1, "type": "dropdown", "public": true },
+          { "name": "Notes", "lines": 3, "id": 3, "position": 3, "type": "textarea", "public": true }
+        ] }
+        """)
+        #expect(list.fields.map(\.name) == ["Media", "Notes"])
+        #expect(list.fields.map(\.isFreeText) == [false, true])
+        #expect(list.fields.map(\.position) == [1, 3])
+    }
+
     @Test("Missing optional collections decode as empty rather than failing")
     func sparseBasicInformation() throws {
         let json = """

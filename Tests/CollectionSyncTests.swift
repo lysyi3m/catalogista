@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Collection sync", .serialized)
 struct CollectionSyncTests {
-    /// Answers the three calls a sync makes. The collection page's `releases` array and its
+    /// Answers every call a sync makes. The collection page's `releases` array and its
     /// `pagination.items` are set independently, so a response can claim more than it sends.
     final class StubProtocol: URLProtocol, @unchecked Sendable {
         nonisolated(unsafe) static var releaseInstanceIDs: [Int] = []
@@ -18,6 +18,13 @@ struct CollectionSyncTests {
         /// between the two requests.
         nonisolated(unsafe) static var foldersAfterPages: [(id: Int, name: String)]?
         nonisolated(unsafe) static var pagesServed = false
+        /// The custom fields Discogs reports; nil answers that request with a 404, which is not
+        /// retried.
+        nonisolated(unsafe) static var fieldsJSON: String?
+        /// Each copy's `notes`, the values of those fields.
+        nonisolated(unsafe) static var fieldValuesJSON = "[]"
+        /// How long the fields request takes, so a test can cancel while it is out.
+        nonisolated(unsafe) static var fieldsDelay: TimeInterval = 0
         private static let lock = NSLock()
 
         static func serve(
@@ -26,9 +33,15 @@ struct CollectionSyncTests {
             pages: Int = 1,
             folders: [(id: Int, name: String)] = [(1, "Uncategorized")],
             copiesIn folderID: Int = 1,
-            foldersAfterPages: [(id: Int, name: String)]? = nil
+            foldersAfterPages: [(id: Int, name: String)]? = nil,
+            fields: String? = "[]",
+            fieldValues: String = "[]",
+            fieldsDelay: TimeInterval = 0
         ) {
             lock.withLock {
+                self.fieldsDelay = fieldsDelay
+                fieldsJSON = fields
+                fieldValuesJSON = fieldValues
                 releaseInstanceIDs = instanceIDs
                 reportedItems = claimingItems
                 reportedPages = pages
@@ -45,7 +58,16 @@ struct CollectionSyncTests {
         override func startLoading() {
             let path = request.url?.path ?? ""
             let body: String
-            if path.hasSuffix("/oauth/identity") {
+            var status = 200
+            if path.hasSuffix("/collection/fields") {
+                Thread.sleep(forTimeInterval: Self.lock.withLock { Self.fieldsDelay })
+                if let fields = Self.lock.withLock({ Self.fieldsJSON }) {
+                    body = #"{"fields":\#(fields)}"#
+                } else {
+                    status = 404
+                    body = #"{"message":"Not found"}"#
+                }
+            } else if path.hasSuffix("/oauth/identity") {
                 body = #"{"id":1,"username":"tester","resource_url":"https://api.discogs.com"}"#
             } else if path.hasSuffix("/collection/folders") {
                 let folders = Self.lock.withLock {
@@ -54,13 +76,13 @@ struct CollectionSyncTests {
                     .map { #"{"id":\#($0.id),"name":"\#($0.name)","count":0}"# }
                 body = #"{"folders":[\#(folders.joined(separator: ","))]}"#
             } else {
-                let (ids, items, pages, folderID) = Self.lock.withLock {
+                let (ids, items, pages, folderID, notes) = Self.lock.withLock {
                     Self.pagesServed = true
-                    return (Self.releaseInstanceIDs, Self.reportedItems, Self.reportedPages, Self.copiesFolderID)
+                    return (Self.releaseInstanceIDs, Self.reportedItems, Self.reportedPages, Self.copiesFolderID, Self.fieldValuesJSON)
                 }
                 let releases = ids.map { id in
                     """
-                    {"id":500,"instance_id":\(id),"folder_id":\(folderID),"rating":0,
+                    {"id":500,"instance_id":\(id),"folder_id":\(folderID),"rating":0,"notes":\(notes),
                      "basic_information":{"id":500,"title":"Remain In Light","year":1980,
                      "cover_image":"https://i.discogs.com/\(id)-cover.jpeg",
                      "artists":[{"name":"Talking Heads","join":""}],
@@ -77,7 +99,7 @@ struct CollectionSyncTests {
                 """
             }
             let response = HTTPURLResponse(
-                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil
+                url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil
             )!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(body.utf8))
@@ -101,6 +123,60 @@ struct CollectionSyncTests {
         )
         let cache = ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString))
         return (CollectionSyncer(client: client, store: store, imageCache: cache), cache)
+    }
+
+    @Test("A sync stores each copy's custom field values and the fields' names in order")
+    func syncStoresCustomFields() async throws {
+        StubProtocol.serve(
+            instanceIDs: [1],
+            claimingItems: 1,
+            fields: """
+            [{"name":"Notes","id":3,"position":3,"type":"textarea","public":true},
+             {"name":"Media","id":1,"position":1,"type":"dropdown","public":true}]
+            """,
+            fieldValues: #"[{"field_id":1,"value":"Very Good Plus (VG+)"}]"#
+        )
+        let store = try makeStore()
+        try await makeSyncer(store: store).reconcile()
+
+        #expect(try await store.fields().map(\.name) == ["Media", "Notes"])
+        #expect(try await store.item(instanceID: 1)?.fieldValues == [FieldValue(fieldID: 1, value: "Very Good Plus (VG+)")])
+    }
+
+    @Test("A sync whose fields request fails fails before it deletes anything")
+    func failedFieldsFailTheSync() async throws {
+        let store = try makeStore()
+        let syncer = makeSyncer(store: store)
+        StubProtocol.serve(
+            instanceIDs: [1, 2],
+            claimingItems: 2,
+            fields: #"[{"name":"Media","id":1,"position":1,"type":"dropdown","public":true}]"#
+        )
+        try await syncer.reconcile()
+
+        // Copy 2 is gone on Discogs, but the sync cannot finish, so it must not prune.
+        StubProtocol.serve(instanceIDs: [1], claimingItems: 1, fields: nil)
+        await #expect(throws: (any Error).self) { try await syncer.reconcile() }
+
+        #expect(try await store.itemCount() == 2, "nothing is deleted by a sync that failed")
+        #expect(try await store.fields().map(\.name) == ["Media"])
+    }
+
+    @Test("A sync cancelled while the fields request is out fails before it deletes anything")
+    func cancelledDuringFieldsDeletesNothing() async throws {
+        let store = try makeStore()
+        let syncer = makeSyncer(store: store)
+        StubProtocol.serve(instanceIDs: [1, 2], claimingItems: 2)
+        try await syncer.reconcile()
+
+        // Copy 2 is gone on Discogs; the fields request is the last one out before pruning.
+        StubProtocol.serve(instanceIDs: [1], claimingItems: 1, fieldsDelay: 0.5)
+        let task = Task { try await syncer.reconcile(rebuilding: true) }
+        try await Task.sleep(for: .milliseconds(250))
+        task.cancel()
+
+        await #expect(throws: (any Error).self) { try await task.value }
+        #expect(try await store.itemCount() == 2, "a cancelled sync must not prune")
     }
 
     @Test("Reconciling hands back the covers to fetch rather than waiting for them")

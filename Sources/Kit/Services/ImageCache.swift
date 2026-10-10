@@ -165,8 +165,8 @@ actor ImageCache {
             return try await fetch(remoteURL, to: destination, priority: priority)
         } catch {
             // The file on disk is from another URL, or has no recorded source, so nothing vouches
-            // for it. It is still what the user saw last: offline, it stays on
-            // screen until Discogs is reachable, like the rest of the cache.
+            // for it. It is still what the user saw last: offline, it stays on screen until
+            // Discogs is reachable, like the rest of the cache.
             guard hasFile, FileManager.default.fileExists(atPath: destination.path) else { throw error }
             return destination
         }

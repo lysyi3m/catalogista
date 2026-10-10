@@ -195,9 +195,9 @@ struct AddRecordView: View {
     #endif
 
     /// The release laid out the way its record page will show it, so the edition can be checked
-    /// before it is added, and the folder it goes into.
+    /// before it is added, then the folder to add it to.
     ///
-    /// Search carries a year but no release date, so Released is absent until the record page
+    /// Search carries a year but no release date, so Released shows the year until the record page
     /// fetches the release.
     private func confirmation(for result: SearchResult) -> some View {
         ScrollView {
@@ -208,17 +208,16 @@ struct AddRecordView: View {
                         cover: result.artwork,
                         title: result.releaseTitle,
                         artist: result.artistName ?? "Unknown artist",
-                        subtitle: ReleaseRow.details([
-                            result.year.map(String.init),
-                            result.formatDisplayName,
+                        facts: Fact.present([
+                            (Fact.label, result.label.first),
+                            (Fact.catalogNumber, result.catno),
+                            (Fact.format, result.formatDisplayName),
+                            (Fact.country, result.country),
+                            (Fact.released, result.year.map(String.init)),
                         ]),
-                        tags: result.genre + result.style
+                        genres: result.genre,
+                        styles: result.style
                     )
-                    EditionFacts([
-                        (EditionFacts.label, result.label.first),
-                        (EditionFacts.catalogNumber, result.catno),
-                        (EditionFacts.country, result.country),
-                    ])
                     PageSection("Folder") {
                         Picker("Folder", selection: $targetFolderID) {
                             ForEach(targets) { folder in

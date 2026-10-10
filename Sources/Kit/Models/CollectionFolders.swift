@@ -44,6 +44,16 @@ enum CollectionFolders {
         return [FolderSnapshot(id: DiscogsFolder.uncategorized, name: "Uncategorized", count: 0)] + listed
     }
 
+    /// `destinations` as the folder menu lists them: Uncategorized, which every account has, in a
+    /// section of its own above the user's folders. A section with nothing in it is left out, so
+    /// an account with no folders of its own gets one section and no separator.
+    static func menuSections(_ destinations: [FolderSnapshot]) -> [[FolderSnapshot]] {
+        [
+            destinations.filter { $0.id == DiscogsFolder.uncategorized },
+            destinations.filter { $0.id != DiscogsFolder.uncategorized },
+        ].filter { !$0.isEmpty }
+    }
+
     /// The folder an add preselects: the folder on screen, or Uncategorized from Collection.
     static func addTarget(for folderID: Int, among targets: [FolderSnapshot]) -> Int {
         targets.contains { $0.id == folderID } ? folderID : DiscogsFolder.uncategorized

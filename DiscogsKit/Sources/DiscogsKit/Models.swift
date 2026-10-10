@@ -50,6 +50,9 @@ public struct CollectionItem: Codable, Sendable, Hashable {
     public let dateAdded: Date?
     public let rating: Int
     public let basicInformation: BasicInformation
+    /// The owner's values for their custom fields on this copy, one per filled-in field. Discogs
+    /// calls them notes; see `CustomField` for what each field is.
+    public let fieldValues: [FieldValue]
 
     enum CodingKeys: String, CodingKey {
         case instanceID = "instance_id"
@@ -58,7 +61,60 @@ public struct CollectionItem: Codable, Sendable, Hashable {
         case dateAdded = "date_added"
         case rating
         case basicInformation = "basic_information"
+        case fieldValues = "notes"
     }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        instanceID = try container.decode(Int.self, forKey: .instanceID)
+        releaseID = try container.decode(Int.self, forKey: .releaseID)
+        folderID = try container.decode(Int.self, forKey: .folderID)
+        dateAdded = try container.decodeIfPresent(Date.self, forKey: .dateAdded)
+        rating = try container.decode(Int.self, forKey: .rating)
+        basicInformation = try container.decode(BasicInformation.self, forKey: .basicInformation)
+        // Absent on a copy with no field filled in.
+        fieldValues = try container.decodeIfPresent([FieldValue].self, forKey: .fieldValues) ?? []
+    }
+}
+
+/// One custom field's value on one copy.
+public struct FieldValue: Codable, Sendable, Hashable {
+    public let fieldID: Int
+    public let value: String
+
+    public init(fieldID: Int, value: String) {
+        self.fieldID = fieldID
+        self.value = value
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case fieldID = "field_id"
+        case value
+    }
+}
+
+/// A field the owner defined on discogs.com for every copy in their collection, such as Media
+/// Condition or a free-text Notes. Created and edited only on discogs.com.
+public struct CustomField: Codable, Sendable, Hashable {
+    public let id: Int
+    public let name: String
+    /// `dropdown` for a choice from a fixed list, `textarea` for free text.
+    public let type: String
+    /// The order discogs.com shows the fields in.
+    public let position: Int
+
+    public var isFreeText: Bool { type == "textarea" }
+
+    public init(id: Int, name: String, type: String, position: Int) {
+        self.id = id
+        self.name = name
+        self.type = type
+        self.position = position
+    }
+}
+
+public struct CustomFieldList: Codable, Sendable {
+    public let fields: [CustomField]
 }
 
 /// The snapshot Discogs embeds in each collection item. Rich enough to render the grid without a

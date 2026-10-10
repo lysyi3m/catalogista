@@ -21,6 +21,8 @@ struct SignOutTests {
                 body = #"{"id":1,"username":"tester","resource_url":"https://api.discogs.com"}"#
             } else if path.hasSuffix("/collection/folders") {
                 body = #"{"folders":[{"id":1,"name":"Uncategorized","count":0}]}"#
+            } else if path.hasSuffix("/collection/fields") {
+                body = #"{"fields":[]}"#
             } else if path.hasPrefix("/releases/") {
                 Thread.sleep(forTimeInterval: 0.3)
                 body = """

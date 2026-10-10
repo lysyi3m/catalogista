@@ -63,6 +63,9 @@ struct WriteFailureTests {
             } else if request.url?.path.hasSuffix("/collection/folders") == true {
                 status = 200
                 body = #"{"folders":[{"id":1,"name":"Uncategorized","count":0}]}"#
+            } else if request.url?.path.hasSuffix("/collection/fields") == true {
+                status = 200
+                body = #"{"fields":[]}"#
             } else if Self.lock.withLock({ Self.failReads }) {
                 status = 500
                 body = #"{"message":"Nope."}"#

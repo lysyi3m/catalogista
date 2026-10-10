@@ -45,6 +45,12 @@ public struct DiscogsClient: Sendable {
         return list.folders
     }
 
+    /// `GET /users/{user}/collection/fields` — the custom fields every copy carries values for.
+    public func customFields(user: String) async throws -> [CustomField] {
+        let list: CustomFieldList = try await get(path: "/users/\(escape(user))/collection/fields")
+        return list.fields
+    }
+
     // MARK: - Releases
 
     /// `GET /releases/{id}` — the full release, including tracklist and full-size images.
