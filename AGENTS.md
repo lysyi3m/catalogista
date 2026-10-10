@@ -98,6 +98,8 @@ condition) is **Copy**.
   the collection's in the status line, a stale record's details on the record page.
 - Cache images on disk, keyed by release id and kind (thumb or cover). The grid and the record
   page both draw `cover_image` (600px, quality 90); the 150px thumb is a fallback and a row icon.
+  The release's full images, which the record page's cover opens in Quick Look, are fetched on
+  that click into a folder per release.
   A file is fetched again only when its URL changes, never because it is old. After each
   complete sync, art and release details of releases no longer in the collection are deleted.
 - SwiftData holds every collection item so the collection is browsable offline.

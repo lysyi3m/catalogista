@@ -27,7 +27,7 @@
 - **Folders** — your Discogs folders in a sidebar, each with the same views, sort and search as the whole collection.
 - **Sort** by date added, artist, title or year, in either direction.
 - **Search** the collection or the open folder as you type, offline.
-- **Record detail** — large cover, edition details, your copy's added date and your own fields (conditions, notes), tracklist, and a link out to Discogs.
+- **Record detail** — large cover that opens every image of the release, edition details, your copy's added date and your own fields (conditions, notes), tracklist, and a link out to Discogs.
 - **Add** — search Discogs, pick the exact release, pick its folder.
 - **Move** — file a copy in another folder from its page, a long press on any cover (right click on Mac), or by dragging it onto a folder in the sidebar.
 - **Remove** — from the same places, behind a confirmation.

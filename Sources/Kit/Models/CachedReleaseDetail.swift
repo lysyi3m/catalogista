@@ -39,6 +39,9 @@ final class CachedReleaseDetail {
     var styles: [String]
     var tracks: [CachedTrack]
     var coverURL: String?
+    /// Every image of the release, the cover first. The record page's image viewer shows them.
+    /// Nil in a copy stored before the app kept them, which is fetched again.
+    var imageURLs: [String]?
     var discogsURL: String?
     /// When this release was fetched. A release older than `Freshness.maximumAge` is fetched again.
     var fetchedAt: Date
@@ -59,6 +62,7 @@ final class CachedReleaseDetail {
         styles = release.styles
         tracks = release.tracklist.map(CachedTrack.init)
         coverURL = release.primaryImage?.uri
+        imageURLs = Self.imageURLs(of: release)
         discogsURL = release.uri
     }
 
@@ -77,7 +81,14 @@ final class CachedReleaseDetail {
         styles = release.styles
         tracks = release.tracklist.map(CachedTrack.init)
         coverURL = release.primaryImage?.uri
+        imageURLs = Self.imageURLs(of: release)
         discogsURL = release.uri
+    }
+
+    static func imageURLs(of release: Release) -> [String] {
+        let primary = release.primaryImage
+        let others = release.images.filter { $0 != primary }
+        return ([primary].compactMap(\.self) + others).map(\.uri).filter { !$0.isEmpty }
     }
 }
 
@@ -96,6 +107,7 @@ struct ReleaseDetailSnapshot: Sendable, Hashable, Identifiable {
     var styles: [String]
     var tracks: [CachedTrack]
     var coverURL: String?
+    var imageURLs: [String]?
     var discogsURL: String?
     var fetchedAt: Date
 
@@ -156,6 +168,7 @@ extension CachedReleaseDetail {
             styles: styles,
             tracks: tracks,
             coverURL: coverURL,
+            imageURLs: imageURLs,
             discogsURL: discogsURL,
             fetchedAt: fetchedAt
         )

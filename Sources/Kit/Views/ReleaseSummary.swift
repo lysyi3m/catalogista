@@ -19,6 +19,9 @@ struct ReleaseHeader: View {
     /// Reports the title's lower edge in the scroll view's coordinates, so a page can put the
     /// title in its navigation bar once it scrolls out of view.
     var onTitleBottomChange: ((CGFloat) -> Void)?
+    /// Makes the cover open the release's images. The record page sets it; the add confirmation
+    /// does not.
+    var gallery: CoverGallery?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
@@ -69,13 +72,21 @@ struct ReleaseHeader: View {
         #endif
     }
 
+    @ViewBuilder
     private func coverImage(edge: CGFloat) -> some View {
-        CoverImageView(releaseID: releaseID, remoteURL: cover.url, kind: cover.kind, edge: edge)
+        let image = CoverImageView(releaseID: releaseID, remoteURL: cover.url, kind: cover.kind, edge: edge)
             .frame(width: edge, height: edge)
-            .clipShape(.rect(cornerRadius: 8))
-            // Soft and low: a dark lower edge drew the eye away from the text beside it.
-            .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+            .clipShape(.rect(cornerRadius: Self.coverCornerRadius))
+        if let gallery {
+            GalleryCover(releaseID: releaseID, artwork: cover, gallery: gallery, cornerRadius: Self.coverCornerRadius) { image }
+        } else {
+            image.shadow(color: Self.coverShadow, radius: 10, y: 4)
+        }
     }
+
+    private static let coverCornerRadius: CGFloat = 8
+    // Soft and low: a dark lower edge drew the eye away from the text beside it.
+    private static let coverShadow = Color.black.opacity(0.16)
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -122,6 +133,128 @@ struct ReleaseHeader: View {
         }
         .font(.body)
     }
+}
+
+/// What the cover opens: the release's images, in Quick Look.
+struct CoverGallery {
+    let count: Int
+    let isLoading: Bool
+    let open: () -> Void
+}
+
+/// The cover as a button that opens the release's images. With more than one image, two sheets in
+/// the cover's own colours stack behind it and a badge gives the count.
+private struct GalleryCover<Cover: View>: View {
+    let releaseID: Int
+    let artwork: (url: String?, kind: ImageCache.Kind)
+    let gallery: CoverGallery
+    let cornerRadius: CGFloat
+    @ViewBuilder let cover: Cover
+
+    @Environment(AppServices.self) private var services
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+    /// Back sheet last. Empty when the cover could not be read, and neutral sheets stand in.
+    @State private var sheetColors: [CoverPalette.RGB] = []
+    @State private var isPaletteRead = false
+    /// The sheets wait until the cover's colours are read, then fan out from behind it.
+    @State private var isFanned = false
+
+    private var hasMore: Bool { gallery.count > 1 }
+
+    var body: some View {
+        Button(action: gallery.open) {
+            // Only the cover lifts on hover; the sheets and the badge keep their place.
+            cover
+                // Close and tight, so the cover lifts off sheets in its own colours.
+                .shadow(color: .black.opacity(hasMore ? 0.22 : 0), radius: 1.5, y: 0.5)
+                .shadow(color: .black.opacity(isHovered ? 0.14 : 0.1), radius: isHovered ? 9 : 6, y: isHovered ? 3 : 2)
+                .scaleEffect(isHovered ? 1.02 : 1)
+                .animation(.smooth(duration: 0.2), value: isHovered)
+                // The sheets stay out of the layout, so the cover keeps its place beside the text.
+                .background {
+                    if hasMore && isPaletteRead {
+                        // Inserted folded, so they have somewhere to fan out from.
+                        sheets
+                            .compositingGroup()
+                            .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
+                            .onAppear { isFanned = true }
+                            .onDisappear { isFanned = false }
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if hasMore || gallery.isLoading { badge.padding(10) }
+                }
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(hasMore ? "Cover, \(gallery.count) images" : "Cover")
+        .accessibilityHint(hasMore ? "Opens the images" : "Opens the image")
+        .task(id: artwork.url) { await readSheetColors() }
+    }
+
+    private var badge: some View {
+        HStack(spacing: 6) {
+            if gallery.isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "photo.on.rectangle")
+            }
+            if hasMore { Text("\(gallery.count)").monospacedDigit() }
+        }
+        .font(.callout.weight(.medium))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .glassEffect(.regular, in: .capsule)
+    }
+
+    /// Sheets in the cover's colours, not the release's other images: those would pull the eye
+    /// from the cover, and need downloading before the page settles.
+    private var sheets: some View {
+        ZStack {
+            fanned(sheet(sheetColors.last), step: 2)
+            fanned(sheet(sheetColors.first), step: 1)
+        }
+    }
+
+    /// Each sheet a step further out than the one in front of it, and a beat behind it, like the
+    /// blades of a hand fan.
+    private func fanned(_ sheet: some View, step: Double) -> some View {
+        let distance = isFanned ? step : 0
+        return sheet
+            .rotationEffect(.degrees(Self.rotation * distance))
+            .offset(x: Self.offset * distance, y: -Self.offset * distance)
+            .animation(
+                isFanned && !reduceMotion ? .spring(duration: 0.5, bounce: 0.35).delay(0.06 * (step - 1)) : nil,
+                value: isFanned
+            )
+    }
+
+    private func sheet(_ color: CoverPalette.RGB?) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(color.map { Color(red: $0.red, green: $0.green, blue: $0.blue) } ?? Color.gray.opacity(0.35))
+            .overlay { RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(.black.opacity(0.08)) }
+    }
+
+    /// From the cover file on disk, small, off the main thread.
+    private func readSheetColors() async {
+        isPaletteRead = false
+        defer { if !Task.isCancelled { isPaletteRead = true } }
+        guard let remote = artwork.url.flatMap(URL.init(string:)),
+              let file = try? await services.imageCache.localURL(
+                  releaseID: releaseID,
+                  kind: artwork.kind,
+                  remoteURL: remote,
+                  priority: .visible
+              )
+        else { return }
+        let colors = await Task.detached(priority: .utility) { CoverPalette.sheetColors(at: file) }.value
+        guard !Task.isCancelled else { return }
+        sheetColors = colors
+    }
+
+    private static var rotation: Double { 2.5 }
+    private static var offset: CGFloat { 3 }
 }
 
 #if os(iOS)

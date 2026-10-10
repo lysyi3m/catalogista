@@ -59,10 +59,15 @@ final class ReleaseDetailLoader {
         return try? context.fetch(descriptor).first?.snapshot
     }
 
+    /// Fresh, and stored by a version of the app that keeps the release's images.
+    private func isCurrent(_ snapshot: ReleaseDetailSnapshot) -> Bool {
+        Freshness.isFresh(snapshot.fetchedAt, now: now()) && snapshot.imageURLs != nil
+    }
+
     /// Shows the release, fetching it when there is no copy or the copy is past
     /// `Freshness.maximumAge`. A stale page stays on screen while it refreshes.
     func load(releaseID: Int) async {
-        if let snapshot, Freshness.isFresh(snapshot.fetchedAt, now: now()) { return }
+        if let snapshot, isCurrent(snapshot) { return }
         if snapshot == nil { state = .loading }
         let generation = services.accountGeneration
         var cached = snapshot
@@ -70,7 +75,7 @@ final class ReleaseDetailLoader {
             if let stored = try await services.store.releaseDetail(releaseID: releaseID) {
                 cached = stored
             }
-            if let cached, Freshness.isFresh(cached.fetchedAt, now: now()) {
+            if let cached, isCurrent(cached) {
                 state = .loaded(cached)
                 return
             }

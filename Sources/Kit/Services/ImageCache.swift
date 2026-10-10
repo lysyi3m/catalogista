@@ -13,9 +13,11 @@ typealias PlatformImage = NSImage
 /// On-disk cache for cover art, keyed by release id.
 ///
 /// Thumbs and covers are stored in separate slots. The cover is Discogs' 600px `cover_image`; the
-/// thumb is the fallback for a release with no cover. Each file records the URL it was downloaded
-/// from, and a request for a different URL downloads again — so the art follows Discogs, and an
-/// app that quits halfway through a sync cannot strand an old image.
+/// thumb is the fallback for a release with no cover. A release's images for the record page's
+/// image viewer are kept apart from both (`releaseImages(releaseID:title:remoteURLs:)`). Each file
+/// records the URL it was downloaded from, and a request for a different URL downloads again — so
+/// the art follows Discogs, and an app that quits halfway through a sync cannot strand an old
+/// image.
 ///
 /// A file with no recorded source is downloaded again, because nothing shows which image it is.
 /// Until a download succeeds the file on disk is still served, so the collection stays browsable
@@ -157,7 +159,10 @@ actor ImageCache {
         remoteURL: URL,
         priority: Priority = .background
     ) async throws -> URL {
-        let destination = fileURL(releaseID: releaseID, kind: kind)
+        try await localFile(at: fileURL(releaseID: releaseID, kind: kind), remoteURL: remoteURL, priority: priority)
+    }
+
+    private func localFile(at destination: URL, remoteURL: URL, priority: Priority) async throws -> URL {
         let hasFile = FileManager.default.fileExists(atPath: destination.path)
         if hasFile, Self.recordedSource(of: destination) == remoteURL.absoluteString { return destination }
 
@@ -170,6 +175,56 @@ actor ImageCache {
             guard hasFile, FileManager.default.fileExists(atPath: destination.path) else { throw error }
             return destination
         }
+    }
+
+    // MARK: - Release images
+
+    /// The folder holding a release's images for the image viewer, one file per image in the order
+    /// of `ReleaseDetailSnapshot.imageURLs`.
+    private func releaseImagesFolder(releaseID: Int) -> URL {
+        directory
+            .appending(path: "gallery", directoryHint: .isDirectory)
+            .appending(path: "\(releaseID)", directoryHint: .isDirectory)
+    }
+
+    /// Downloads a release's images for the image viewer and returns their files, in order.
+    ///
+    /// Each file follows its URL like a cover does. The viewer shows a file's name as its title and
+    /// tells an image by its extension, so a file is named "<title> 2 of 6" with the image's own
+    /// extension. An image that cannot be fetched is left out; the call fails only when none can be.
+    func releaseImages(releaseID: Int, title: String, remoteURLs: [URL]) async throws -> [URL] {
+        let folder = releaseImagesFolder(releaseID: releaseID)
+        // Short of the 255-byte file name limit, and free of the characters a path cannot hold.
+        let name = String(title.prefix(60))
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let destinations = remoteURLs.enumerated().map { index, url in
+            let fileExtension = url.pathExtension.isEmpty ? "jpeg" : url.pathExtension
+            return folder.appending(
+                path: "\(name) \(index + 1) of \(remoteURLs.count).\(fileExtension)",
+                directoryHint: .notDirectory
+            )
+        }
+        // Images Discogs no longer lists, and files left by an earlier order of the same images.
+        let current = Set(destinations.map(\.lastPathComponent))
+        for file in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where !current.contains(file.lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
+
+        let files = await withTaskGroup(of: (Int, URL?).self) { group in
+            for (index, pair) in zip(destinations, remoteURLs).enumerated() {
+                group.addTask {
+                    (index, try? await self.localFile(at: pair.0, remoteURL: pair.1, priority: .visible))
+                }
+            }
+            var files = [URL?](repeating: nil, count: destinations.count)
+            for await (index, file) in group { files[index] = file }
+            return files.compactMap(\.self)
+        }
+        try Task.checkCancellation()
+        guard !files.isEmpty else { throw CacheError.notAnImage }
+        return files
     }
 
     /// Downloads `remoteURL` into `destination`, sharing a download already in flight for the same
@@ -280,6 +335,12 @@ actor ImageCache {
                 else { continue }
                 if (try? FileManager.default.removeItem(at: file)) != nil { removed += 1 }
             }
+        }
+        let gallery = directory.appending(path: "gallery", directoryHint: .isDirectory)
+        let releaseFolders = (try? FileManager.default.contentsOfDirectory(at: gallery, includingPropertiesForKeys: nil)) ?? []
+        for folder in releaseFolders {
+            guard let releaseID = Int(folder.lastPathComponent), !releaseIDs.contains(releaseID) else { continue }
+            if (try? FileManager.default.removeItem(at: folder)) != nil { removed += 1 }
         }
         return removed
     }

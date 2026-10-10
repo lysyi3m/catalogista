@@ -83,6 +83,32 @@ struct ReleaseDetailTests {
         #expect(ReleaseDetailLoader.cachedDetail(releaseID: 42, in: container.mainContext) == nil)
     }
 
+    @Test("A fresh copy stored before the app kept images is fetched again")
+    @MainActor
+    func copyWithoutImagesIsFetchedAgain() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SignOutTests.SlowCollectionProtocol.self]
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
+        try tokenStore.save("test-token")
+        defer { try? tokenStore.delete() }
+        let container = try AppServices.makeModelContainer(inMemory: true)
+        let services = AppServices(
+            modelContainer: container,
+            tokenStore: tokenStore,
+            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
+            sessionConfiguration: configuration
+        )
+        try await services.store.upsertReleaseDetail(makeRelease(id: 500, title: "Cached"))
+        let stored = try #require(try container.mainContext.fetch(FetchDescriptor<CachedReleaseDetail>()).first)
+        stored.imageURLs = nil
+        try container.mainContext.save()
+        let loader = ReleaseDetailLoader(services: services, cached: stored.snapshot)
+
+        await loader.load(releaseID: 500)
+        #expect(loader.snapshot?.title == "Remain In Light", "the copy is replaced by a fetch")
+        #expect(loader.snapshot?.imageURLs == [])
+    }
+
     @Test("A stale copy is on screen while its refresh is still out")
     @MainActor
     func staleCopyShowsDuringRefresh() async throws {
@@ -124,6 +150,10 @@ struct ReleaseDetailTests {
         #expect(cached.catalogNumber == "SRK 6095")
         #expect(cached.country == "US")
         #expect(cached.coverURL == "https://i.discogs.com/front.jpeg", "the primary image is kept")
+        #expect(
+            cached.imageURLs == ["https://i.discogs.com/front.jpeg", "https://i.discogs.com/back.jpeg"],
+            "every image is kept, the cover first"
+        )
         #expect(cached.discogsURL == "https://www.discogs.com/release/1373891")
     }
 

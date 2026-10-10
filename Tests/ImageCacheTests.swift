@@ -547,6 +547,58 @@ struct ImageCacheTests {
         #expect(pixels.height == 75)
     }
 
+    @Test("A release's images are kept in order, named for the viewer, and fetched once")
+    func releaseImages() async throws {
+        CountingProtocol.reset()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        let front = URL(string: "https://i.discogs.com/front.jpeg")!
+        let back = URL(string: "https://i.discogs.com/back.png")!
+
+        let files = try await cache.releaseImages(releaseID: 7, title: "AC/DC: Live", remoteURLs: [front, back])
+        #expect(files.map(\.lastPathComponent) == ["AC-DC- Live 1 of 2.jpeg", "AC-DC- Live 2 of 2.png"])
+
+        _ = try await cache.releaseImages(releaseID: 7, title: "AC/DC: Live", remoteURLs: [front, back])
+        #expect(CountingProtocol.count(for: front.absoluteString) == 1, "a file on disk is not fetched again")
+
+        // Discogs dropped the back cover: its file goes, and so does the old name of the front.
+        let remaining = try await cache.releaseImages(releaseID: 7, title: "AC/DC: Live", remoteURLs: [front])
+        let folder = files[0].deletingLastPathComponent()
+        let onDisk = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        #expect(onDisk == [remaining[0].lastPathComponent])
+    }
+
+    @Test("A release's images go with its covers when it leaves the collection")
+    func releaseImagesArePruned() async throws {
+        CountingProtocol.reset()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        let kept = try await cache.releaseImages(releaseID: 1, title: "Kept", remoteURLs: [URL(string: "https://i.discogs.com/1.jpeg")!])
+        let removed = try await cache.releaseImages(releaseID: 2, title: "Gone", remoteURLs: [URL(string: "https://i.discogs.com/2.jpeg")!])
+
+        await cache.prune(keeping: [1])
+        #expect(FileManager.default.fileExists(atPath: kept[0].path))
+        #expect(!FileManager.default.fileExists(atPath: removed[0].deletingLastPathComponent().path))
+    }
+
+    @Test("Opening the images fails only when none can be fetched")
+    func releaseImagesFailOnlyWhenAllFail() async throws {
+        CountingProtocol.reset()
+        CountingProtocol.serve(body: Data("<html>".utf8))
+        defer { CountingProtocol.reset() }
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        await #expect(throws: (any Error).self) {
+            try await cache.releaseImages(releaseID: 3, title: "Offline", remoteURLs: [URL(string: "https://i.discogs.com/3.jpeg")!])
+        }
+    }
+
     private static func cgImage(of image: PlatformImage) -> CGImage? {
         #if canImport(UIKit)
         image.cgImage
