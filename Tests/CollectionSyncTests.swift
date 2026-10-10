@@ -242,6 +242,40 @@ struct CollectionSyncTests {
         CollectionStore(modelContainer: try AppServices.makeModelContainer(inMemory: true))
     }
 
+    @Test("The cover warmer fetches every cover, a few at a time, and a cancelled one starts no more")
+    func warmerIsBounded() async throws {
+        let imageConfiguration = URLSessionConfiguration.ephemeral
+        imageConfiguration.protocolClasses = [ImageCacheTests.SlowProtocol.self]
+        func makeSyncer() throws -> (CollectionSyncer, ImageCache) {
+            let cache = ImageCache(
+                directory: URL.temporaryDirectory.appending(path: UUID().uuidString),
+                session: URLSession(configuration: imageConfiguration)
+            )
+            let syncer = CollectionSyncer(
+                client: DiscogsClient(token: "test", configuration: DiscogsConfiguration(userAgent: "Catalogista/1.0 +tests")),
+                store: try makeStore(),
+                imageCache: cache
+            )
+            return (syncer, cache)
+        }
+        // A host per run, so parallel tests' downloads stay out of the counts.
+        func targets(host: String) -> [CollectionSyncer.ArtworkTarget] {
+            (1...20).map { .init(releaseID: $0, url: URL(string: "https://\(host)/\($0).jpeg")!, kind: .cover) }
+        }
+
+        let (syncer, cache) = try makeSyncer()
+        #expect(await syncer.warmArtwork(Array(targets(host: "warm-all.test").prefix(8))) == 8)
+        #expect(await cache.statistics().fileCount == 8)
+
+        let (cancelled, _) = try makeSyncer()
+        let warming = Task { await cancelled.warmArtwork(targets(host: "warm-cancelled.test")) }
+        // Inside the first round of slow downloads, which take 0.4 s each.
+        try await Task.sleep(for: .milliseconds(100))
+        warming.cancel()
+        _ = await warming.value
+        #expect(ImageCacheTests.SlowProtocol.started(onHost: "warm-cancelled.test").count <= 6)
+    }
+
     @Test("A page that sends fewer records than it claims deletes nothing")
     func shortPageKeepsTheCache() async throws {
         let store = try makeStore()
