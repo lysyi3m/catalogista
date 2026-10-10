@@ -1,4 +1,5 @@
 import DiscogsKit
+import QuickLook
 import SwiftData
 import SwiftUI
 
@@ -23,6 +24,11 @@ struct RecordDetailView: View {
     /// The visible height. A short page is stretched to it, which keeps the credit on the bottom
     /// edge. See `creditViewport(_:)`.
     @State private var viewportHeight: CGFloat = 0
+    @State private var isLoadingImages = false
+    /// The release's images on disk, and the one Quick Look shows. Quick Look opens when it is set.
+    @State private var imageFiles: [URL] = []
+    @State private var previewedImage: URL?
+    @State private var imagesFailed = false
     #if os(iOS)
     /// Whether the page's title has scrolled under the navigation bar. Until it has, the bar stays
     /// empty rather than repeat it.
@@ -111,9 +117,19 @@ struct RecordDetailView: View {
                 RecordMenu(
                     discogsURL: discogsURL,
                     isWorking: editor?.isWorking ?? true,
+                    onShowImages: openImages,
                     onRequestRemove: { isConfirmingRemoval = true }
                 )
             }
+        }
+        .quickLookPreview($previewedImage, in: imageFiles)
+        .onAppear { services.commands.recordPagesOnScreen += 1 }
+        .onDisappear { services.commands.recordPagesOnScreen -= 1 }
+        .onChange(of: services.commands.imagesRequests) { openImages() }
+        .alert("The images could not be loaded.", isPresented: $imagesFailed) {
+            Button("OK") {}
+        } message: {
+            Text("Check your connection and try again.")
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -177,6 +193,32 @@ struct RecordDetailView: View {
         return collection
     }
 
+    /// The release's images, the cover first. Until the release is fetched, the cover alone.
+    private var imageSources: [URL] {
+        if let urls = detail?.imageURLs, !urls.isEmpty { return urls.compactMap(URL.init(string:)) }
+        return [coverSource.url].compactMap { $0.flatMap(URL.init(string:)) }
+    }
+
+    private func openImages() {
+        let sources = imageSources
+        guard !isLoadingImages, !sources.isEmpty else { return }
+        isLoadingImages = true
+        Task {
+            defer { isLoadingImages = false }
+            do {
+                imageFiles = try await services.imageCache.releaseImages(
+                    releaseID: item.releaseID,
+                    title: item.title,
+                    remoteURLs: sources
+                )
+                previewedImage = imageFiles.first
+            } catch is CancellationError {
+            } catch {
+                imagesFailed = true
+            }
+        }
+    }
+
     private var header: some View {
         ReleaseHeader(
             releaseID: item.releaseID,
@@ -198,7 +240,8 @@ struct RecordDetailView: View {
                 titleTracking.titleBottom = bottom
                 updateTitleUnderBar()
                 #endif
-            }
+            },
+            gallery: CoverGallery(count: imageSources.count, isLoading: isLoadingImages, open: openImages)
         )
     }
 

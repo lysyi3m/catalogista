@@ -39,10 +39,12 @@ struct FolderMenu: View {
 struct RecordMenu: View {
     let discogsURL: URL
     let isWorking: Bool
+    let onShowImages: () -> Void
     let onRequestRemove: () -> Void
 
     var body: some View {
         Menu {
+            Button("Show Images", systemImage: "photo.on.rectangle", action: onShowImages)
             Link(destination: discogsURL) {
                 Label("View on Discogs", systemImage: "arrow.up.right.square")
             }

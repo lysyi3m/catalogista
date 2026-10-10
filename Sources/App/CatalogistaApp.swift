@@ -88,6 +88,10 @@ struct CatalogistaApp: App {
                     // Searches the folder on screen, so the item cannot name one.
                     Button("Find") { services.commands.requestFind() }
                         .keyboardShortcut("f", modifiers: .command)
+                    // ⌘Y, as Quick Look in the Finder.
+                    Button("Show Images") { services.commands.requestImages() }
+                        .keyboardShortcut("y", modifiers: .command)
+                        .disabled(!services.commands.isShowImagesAvailable)
                 }
             }
         }
