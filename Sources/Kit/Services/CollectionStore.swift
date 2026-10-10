@@ -92,7 +92,7 @@ actor CollectionStore {
         guard let item = try cachedItem(instanceID: instanceID) else { return }
         modelContext.delete(item)
         try saveOrRollback()
-        writes[instanceID] = WriteMark(kind: .removed)
+        mark(instanceID, .removed)
     }
 
     // MARK: - Optimistic writes
@@ -101,7 +101,7 @@ actor CollectionStore {
     func insert(_ pending: PendingAddition) throws {
         modelContext.insert(CachedCollectionItem(from: pending))
         try saveOrRollback()
-        writes[pending.instanceID] = WriteMark(kind: .added)
+        mark(pending.instanceID, .added)
     }
 
     /// Puts a removed copy back, after Discogs rejected the delete.
@@ -109,7 +109,7 @@ actor CollectionStore {
         guard try cachedItem(instanceID: snapshot.instanceID) == nil else { return }
         modelContext.insert(CachedCollectionItem(from: snapshot))
         try saveOrRollback()
-        writes[snapshot.instanceID] = nil
+        unmark(snapshot.instanceID, .removed)
     }
 
     /// Files a copy under another folder, before Discogs has confirmed it, and returns the folder it
@@ -120,7 +120,7 @@ actor CollectionStore {
         let previous = item.folderID
         item.folderID = folderID
         try saveOrRollback()
-        writes[instanceID] = WriteMark(kind: .moved)
+        mark(instanceID, .moved)
         return previous
     }
 
@@ -129,8 +129,8 @@ actor CollectionStore {
         guard let item = try cachedItem(instanceID: provisional) else { return }
         item.instanceID = confirmed
         try saveOrRollback()
-        writes[provisional] = nil
-        writes[confirmed] = WriteMark(kind: .added)
+        unmark(provisional, .added)
+        mark(confirmed, .added)
     }
 
     /// Replaces the search-derived fields with the release's own, once it has been fetched.
@@ -269,28 +269,43 @@ actor CollectionStore {
     /// that began before it settled. A sync that begins later fetched its pages after the write
     /// landed, and drops the mark. Kept on this actor, so a write and a sync's use of the marks
     /// cannot interleave.
-    private var writes: [Int: WriteMark] = [:]
+    ///
+    /// Marked per kind: a copy added and then moved needs both protections, and the move must not
+    /// end the add's.
+    private var writes: [WriteKey: WriteMark] = [:]
     /// Counts sync starts, to tell which syncs began before a write settled.
     private var syncEpoch = 0
     /// The epoch of the sync in progress, if any.
     private var runningSync: Int?
 
-    private struct WriteMark {
+    private struct WriteKey: Hashable {
         enum Kind { case added, removed, moved }
+        let instanceID: Int
         let kind: Kind
+    }
+
+    private struct WriteMark {
         /// The epoch when the write finished; nil while it is in flight.
         var settledAt: Int?
     }
 
-    private func respectedWrites(_ kind: WriteMark.Kind) -> Set<Int> {
+    private func mark(_ instanceID: Int, _ kind: WriteKey.Kind) {
+        writes[WriteKey(instanceID: instanceID, kind: kind)] = WriteMark()
+    }
+
+    private func unmark(_ instanceID: Int, _ kind: WriteKey.Kind) {
+        writes[WriteKey(instanceID: instanceID, kind: kind)] = nil
+    }
+
+    private func respectedWrites(_ kind: WriteKey.Kind) -> Set<Int> {
         guard let runningSync else { return [] }
-        return Set(writes.filter { $0.value.kind == kind && ($0.value.settledAt ?? .max) >= runningSync }.keys)
+        return Set(writes.filter { $0.key.kind == kind && ($0.value.settledAt ?? .max) >= runningSync }.map(\.key.instanceID))
     }
 
     /// Ends the in-flight period of the writes to these copies. Settling twice is harmless.
     func settleWrites(_ instanceIDs: Set<Int>) {
-        for id in instanceIDs where writes[id]?.settledAt == nil {
-            writes[id]?.settledAt = syncEpoch
+        for key in writes.keys where instanceIDs.contains(key.instanceID) && writes[key]?.settledAt == nil {
+            writes[key]?.settledAt = syncEpoch
         }
     }
 

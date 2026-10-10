@@ -21,8 +21,11 @@ final class SyncController {
 
     private unowned let services: AppServices
     /// The sync currently in flight, so work tied to the account can be stopped before the account
-    /// goes away. Held because `runSync` deliberately shields the work from its caller.
-    private var running: Task<Bool, Never>?
+    /// goes away, and so `syncAfterWrite` can tell whether it started after a write. Held because
+    /// `start` deliberately shields the work from its caller.
+    private var running: (number: Int, task: Task<Bool, Never>)?
+    /// Counts sync starts; `running.number` is the count when it started.
+    private var syncCount = 0
     /// Cover downloads, which outlive the sync that scheduled them. Tracked so sign-out can stop
     /// them: they write files for whichever account asked for them.
     private var warmingArtwork: Task<Void, Never>?
@@ -68,14 +71,7 @@ final class SyncController {
     @discardableResult
     func sync() async -> Bool {
         guard !isSyncing else { return false }
-        isSyncing = true
-        activity = "Syncing…"
-        defer {
-            isSyncing = false
-            activity = nil
-            progress = nil
-        }
-        return await runSync()
+        return await start(activity: "Syncing…").value
     }
 
     /// Runs a sync that is guaranteed to have started *after* this call, and reports whether it
@@ -84,24 +80,40 @@ final class SyncController {
     /// `sync()` returns immediately when one is already in flight, which is fine for a refresh but
     /// useless for settling a write: that sync began before the write and cannot have seen it.
     /// Reading `errorMessage` afterwards is worse still, because the in-flight sync may have set
-    /// it. Waiting for the current one and then running a fresh one is the only honest answer.
+    /// it. So an older sync is waited out, and a sync that started after this call is joined
+    /// rather than competed with: two writes settling at once share one sync.
     func syncAfterWrite() async -> Bool {
-        if let running { _ = await running.value }
-        return await sync()
+        let startedBefore = syncCount
+        while let running {
+            if running.number > startedBefore { return await running.task.value }
+            _ = await running.task.value
+        }
+        return await start(activity: "Syncing…").value
     }
 
-    /// Runs a sync in a task of its own, so whoever asked for it cannot cancel it half-done.
+    /// Starts a sync in a task of its own, so whoever asked for it cannot cancel it half-done.
     ///
     /// `.refreshable` cancels its task the moment the refresh control retracts, and a collection
     /// fetch that is cancelled mid-stream returns no pages at all. A refresh the user asked for is
     /// worth finishing. The task is kept so `cancelAndWait` can still stop it deliberately — being
     /// shielded from the caller is not the same as being unstoppable.
-    private func runSync(rebuilding: Bool = false) async -> Bool {
-        let task = Task { await self.performSync(rebuilding: rebuilding) }
-        running = task
-        let succeeded = await task.value
-        running = nil
-        return succeeded
+    ///
+    /// The task also returns the controller to idle before it finishes, so whoever its result
+    /// wakes finds no sync in flight.
+    private func start(rebuilding: Bool = false, activity: String) -> Task<Bool, Never> {
+        syncCount += 1
+        isSyncing = true
+        self.activity = activity
+        let task = Task {
+            let succeeded = await self.performSync(rebuilding: rebuilding)
+            self.isSyncing = false
+            self.activity = nil
+            self.progress = nil
+            self.running = nil
+            return succeeded
+        }
+        running = (syncCount, task)
+        return task
     }
 
     /// Stops any sync in flight and waits for it to finish unwinding.
@@ -111,6 +123,7 @@ final class SyncController {
     /// pruning, so nothing is half-applied.
     func cancelAndWait() async {
         warmingArtwork?.cancel()
+        let running = running?.task
         running?.cancel()
         // Before waiting: the warmer's children wait on downloads the image cache shares between
         // callers, which cancelling the warmer does not reach. Waiting first would wait for the
@@ -155,15 +168,7 @@ final class SyncController {
         guard !isSyncing else { return }
         guard services.client != nil else { throw ResetError.noToken }
 
-        isSyncing = true
-        activity = "Downloading collection…"
-        defer {
-            isSyncing = false
-            activity = nil
-            progress = nil
-        }
-
-        guard await runSync(rebuilding: true) else {
+        guard await start(rebuilding: true, activity: "Downloading collection…").value else {
             let reason = errorMessage ?? ""
             // The cache is intact, so on the collection screen being offline is a status line, as
             // after any failed sync.
