@@ -77,37 +77,27 @@ public struct ContentView: View {
         folders.first { $0.id == folderID }?.name ?? "Collection"
     }
 
-    /// Copies per folder and the search's match count, kept rather than computed in the body. The
-    /// sidebar reads the counts once per folder, and a computed property would walk the whole
-    /// collection for each of them on every redraw.
+    /// Copies per folder, kept rather than computed in the body. The sidebar reads the counts once
+    /// per folder, and a computed property would walk the whole collection for each of them on
+    /// every redraw.
     @State private var folderCounts: [Int: Int] = [:]
+    /// The search's match count, as `CollectionView`'s filtered query reports it.
     @State private var matchCount = 0
 
-    /// What the counts depend on. Adds and removes change the count; a move on this device bumps
-    /// the folder revision, and the sync time stands in for moves made elsewhere.
+    /// What the folder counts depend on. Adds and removes change the count; a move on this device
+    /// bumps the folder revision, and the end of any sync stands in for moves made elsewhere.
     private struct CountsKey: Hashable {
         let itemCount: Int
         let folderRevision: Int
-        let lastSyncedAt: Date?
-        let folderID: Int
-        let query: String
+        let syncsEnded: Int
     }
 
     private var countsKey: CountsKey {
         CountsKey(
             itemCount: allItems.count,
             folderRevision: services.folderRevision,
-            lastSyncedAt: syncController.lastSyncedAt,
-            folderID: folderID,
-            query: searchQuery
+            syncsEnded: syncController.syncsEnded
         )
-    }
-
-    private func recount() {
-        folderCounts = CollectionFolders.counts(of: allItems.lazy.map(\.folderID))
-        guard !searchQuery.isEmpty else { return }
-        let predicate = CachedCollectionItem.predicate(inFolder: folderID, matching: searchQuery)
-        matchCount = allItems.filter { (try? predicate.evaluate($0)) ?? false }.count
     }
 
     public var body: some View {
@@ -136,7 +126,9 @@ public struct ContentView: View {
             .onChange(of: folderID) {
                 if sidebarSelection != nil { sidebarSelection = folderID }
             }
-            .onChange(of: countsKey, initial: true) { recount() }
+            .onChange(of: countsKey, initial: true) {
+                folderCounts = CollectionFolders.counts(of: allItems.lazy.map(\.folderID))
+            }
             .task {
                 if editor == nil { editor = services.makeEditor() }
                 // On-launch delta, skipped when a sync ran moments ago.
@@ -346,7 +338,8 @@ public struct ContentView: View {
                 onMove: { item, folderID in
                     Task { await editor?.move(instanceID: item.instanceID, toFolderID: folderID) }
                 },
-                onRequestRemove: { pendingRemoval = $0 }
+                onRequestRemove: { pendingRemoval = $0 },
+                onCountChange: { matchCount = $0 }
             )
             // A fresh view per folder, so a new folder opens at the top rather than at the
             // previous folder's scroll offset.

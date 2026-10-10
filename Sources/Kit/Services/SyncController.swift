@@ -16,6 +16,9 @@ final class SyncController {
     /// status rather than a failure.
     private(set) var isOffline = false
     private(set) var lastSyncedAt: Date?
+    /// Bumped when any sync ends, applied or not: a sync that fails late has already written its
+    /// pages, so what the cache holds may have changed either way.
+    private(set) var syncsEnded = 0
     /// What the current operation is doing, for a progress label. Nil when idle.
     private(set) var activity: String?
 
@@ -180,6 +183,7 @@ final class SyncController {
     private func performSync(rebuilding: Bool = false) async -> Bool {
         guard let syncer = services.makeSyncer() else { return false }
         errorMessage = nil
+        defer { syncsEnded += 1 }
 
         do {
             let summary = try await syncer.reconcile(rebuilding: rebuilding) { update in
@@ -217,6 +221,9 @@ final class SyncController {
         using syncer: CollectionSyncer
     ) {
         warmingArtwork?.cancel()
-        warmingArtwork = Task { await syncer.warmArtwork(targets) }
+        warmingArtwork = Task {
+            let fetched = await syncer.warmArtwork(targets)
+            if fetched > 0, !Task.isCancelled { services.noteImagesChanged() }
+        }
     }
 }
