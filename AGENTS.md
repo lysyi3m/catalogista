@@ -67,8 +67,9 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
 - **The API Terms of Use require two notices.** The affiliation notice
   (`DiscogsNotice.affiliation`) appears in Settings ▸ About, on the setup screen and in the
   README. `DiscogsCredit` ("Data provided by Discogs." and a "View ↗" link to the
-  discogs.com page that holds the data, on one line) ends every view of Discogs data. It owns the space
-  around it, so place it flush against the content; in a list, make it the last row with
+  discogs.com page that holds the data, on one line) ends every view of collection or release
+  data. Account details, such as the username and record counts in Settings, need none. It
+  owns the space around it, so place it flush against the content; in a list, make it the last row with
   `.creditRow()` and pass `DiscogsCredit.standardListOffset` as `listOffset`, so the credit ends
   at the same height as on every other screen. A new screen of Discogs data needs its own credit.
 
@@ -124,6 +125,10 @@ commit `.env`.
   (`AppLinks.privacyPolicy`). Never move or rename it, and keep its claims true of the code.
 - **Privacy manifest keys are unvalidated.** `plutil` and Xcode accept a wrong key silently.
   Check `Config/PrivacyInfo.xcprivacy` against Apple's documentation, not against a clean build.
+- `Config/Catalogista-iOS.entitlements` is tracked, an exception to the ground rule on
+  `Config/*.entitlements`. It is hand-written, not generated: the iOS Keychain needs
+  `application-identifier` and `keychain-access-groups`, and macOS rejects
+  `application-identifier`, so iOS takes its own file. The macOS file stays generated.
 - `LD_RUNPATH_SEARCH_PATHS` carries a macOS-specific variant in `project.yml`. XcodeGen emits
   only the iOS rpath for a multiplatform target, and a macOS executable sits one level deeper.
   Removing it makes the app abort at launch on `@rpath/CatalogistaKit.framework`.
