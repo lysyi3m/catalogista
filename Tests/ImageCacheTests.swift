@@ -356,6 +356,12 @@ struct ImageCacheTests {
             try await cache.localURL(releaseID: 9, kind: .thumb, remoteURL: remote)
         }
         #expect(await cache.isCached(releaseID: 9, kind: .thumb) == false)
+
+        // A failed download left behind as in flight would answer this with the old failure.
+        CountingProtocol.statusCode = 200
+        _ = try await cache.localURL(releaseID: 9, kind: .thumb, remoteURL: remote)
+        #expect(CountingProtocol.count(for: remote.absoluteString) == 2)
+        #expect(await cache.isCached(releaseID: 9, kind: .thumb))
     }
 
     @Test("A 200 carrying an HTML error page is not cached as an image")
@@ -525,9 +531,9 @@ struct ImageCacheTests {
         return context?.makeImage().map(ImageCache.platformImage)
     }
 
-    @Test("Cached images decode, downsampled to the requested size")
+    @Test("Cached images decode, downsampled to the requested size with their aspect ratio")
     func downsamples() async throws {
-        CountingProtocol.reset()
+        CountingProtocol.serve(body: try Self.image(width: 600, height: 300))
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -535,6 +541,17 @@ struct ImageCacheTests {
         let remote = URL(string: "https://i.discogs.com/decodable.jpeg")!
 
         let image = try await cache.image(releaseID: 3, kind: .thumb, remoteURL: remote, maximumPixelSize: 150)
-        #expect(image.size.width > 0)
+        let pixels = try #require(Self.cgImage(of: image))
+        // Decoded at full size, a grid of covers would hold megabytes per cell.
+        #expect(pixels.width == 150)
+        #expect(pixels.height == 75)
+    }
+
+    private static func cgImage(of image: PlatformImage) -> CGImage? {
+        #if canImport(UIKit)
+        image.cgImage
+        #else
+        image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        #endif
     }
 }

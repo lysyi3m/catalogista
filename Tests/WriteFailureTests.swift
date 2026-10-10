@@ -6,6 +6,8 @@ import Testing
 @Suite("Write failures", .serialized)
 @MainActor
 struct WriteFailureTests {
+    private let testDefaults = TestDefaults()
+
     /// Stands in for Discogs in the session `makeServices` gives the client. Fails the write once,
     /// then lets it through, so a retry has something different to find.
     final class FlakyProtocol: URLProtocol, @unchecked Sendable {
@@ -108,7 +110,11 @@ struct WriteFailureTests {
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
             tokenStore: tokenStore,
             imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
-            sessionConfiguration: configuration
+            sessionConfiguration: configuration,
+            // These tests are about what the editor does with a failure, not how the client retries
+            // one; DiscogsKit's own tests cover that. Real backoff would make each failure seconds.
+            clientConfiguration: DiscogsConfiguration(userAgent: DiscogsUserAgent.value, maxRetries: 0),
+            defaults: testDefaults.defaults
         )
         return (services, tokenStore)
     }
@@ -147,7 +153,10 @@ struct WriteFailureTests {
         FlakyProtocol.collectionInstanceIDs = [111, 222]
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -163,7 +172,10 @@ struct WriteFailureTests {
         FlakyProtocol.collectionInstanceIDs = [111]
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -180,7 +192,10 @@ struct WriteFailureTests {
         FlakyProtocol.collectionInstanceIDs = []
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
 
         let editor = services.makeEditor()
         #expect(await editor.add(try makeSearchResult(), folderID: 5) == false)
@@ -197,7 +212,10 @@ struct WriteFailureTests {
         FlakyProtocol.failReads = true
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         // The identity check passes; the collection itself does not come down.
@@ -212,6 +230,8 @@ struct WriteFailureTests {
         }
         #expect(services.syncController.errorMessage != nil, "the collection screen must show it too")
         #expect(try await services.store.itemCount() == 1, "nothing is cleared before the download completes")
+        #expect(services.syncController.isSyncing == false, "a failed reset must not leave the controller busy")
+        #expect(services.syncController.activity == nil)
     }
 
     @Test("A reset that completes drops release details, and keeps the collection")
@@ -220,7 +240,10 @@ struct WriteFailureTests {
         FlakyProtocol.collectionInstanceIDs = [111]
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
         let release = try DiscogsClient.makeDecoder().decode(Release.self, from: Data("""
             {"id":500,"title":"Remain In Light","artists":[],"labels":[],"formats":[],
@@ -239,7 +262,10 @@ struct WriteFailureTests {
         FlakyProtocol.reset(failureStatus: 404)
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         // A 404, and the sync confirms Discogs no longer lists the copy: what the user asked for.
@@ -257,7 +283,10 @@ struct WriteFailureTests {
         FlakyProtocol.collectionInstanceIDs = [111]
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -274,7 +303,10 @@ struct WriteFailureTests {
         FlakyProtocol.failReads = true
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -289,7 +321,10 @@ struct WriteFailureTests {
         FlakyProtocol.reset(writesToFail: 0)
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -303,7 +338,10 @@ struct WriteFailureTests {
         FlakyProtocol.reset()
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -321,7 +359,10 @@ struct WriteFailureTests {
         FlakyProtocol.collectionInstanceIDs = [111]
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         // Discogs still lists the copy in folder 1, so the move did not land.
@@ -338,7 +379,10 @@ struct WriteFailureTests {
         FlakyProtocol.failReads = true
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -357,7 +401,10 @@ struct WriteFailureTests {
         FlakyProtocol.reset(writesToFail: 0)
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         // Another editor's move of this copy is still under way.
@@ -380,7 +427,10 @@ struct WriteFailureTests {
         FlakyProtocol.collectionInstanceIDs = [111]
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()
@@ -395,7 +445,10 @@ struct WriteFailureTests {
         FlakyProtocol.reset(writesToFail: 0)
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111), try makeItem(instanceID: 222)])
 
         // Two drops on the sidebar in quick succession, through the grid's one editor.
@@ -413,7 +466,10 @@ struct WriteFailureTests {
         FlakyProtocol.reset()
 
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         try await services.store.upsert([try makeItem(instanceID: 111)])
 
         let editor = services.makeEditor()

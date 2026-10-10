@@ -1,10 +1,13 @@
 import DiscogsKit
 import Foundation
+import SwiftData
 import Testing
 @testable import CatalogistaKit
 
 @Suite("Release detail cache")
 struct ReleaseDetailTests {
+    private let testDefaults = TestDefaults()
+
     private func makeStore() throws -> CollectionStore {
         CollectionStore(modelContainer: try AppServices.makeModelContainer(inMemory: true))
     }
@@ -87,12 +90,16 @@ struct ReleaseDetailTests {
         configuration.protocolClasses = [SignOutTests.SlowCollectionProtocol.self]
         let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
         try tokenStore.save("test-token")
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         let services = AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
             tokenStore: tokenStore,
             imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
-            sessionConfiguration: configuration
+            sessionConfiguration: configuration,
+            defaults: testDefaults.defaults
         )
         try await services.store.upsertReleaseDetail(makeRelease(id: 500, title: "Cached"))
         let sevenHoursLater = Date.now.addingTimeInterval(7 * 3600)
@@ -142,13 +149,66 @@ struct ReleaseDetailTests {
         #expect(cached.title == "New Title")
     }
 
-    @Test("Two copies of one release share a single detail record")
-    func sharedAcrossInstances() async throws {
-        let store = try makeStore()
-        try await store.upsertReleaseDetail(makeRelease(id: 500))
+    /// Answers release requests and counts them.
+    final class CountingReleaseProtocol: URLProtocol, @unchecked Sendable {
+        private static let lock = NSLock()
+        nonisolated(unsafe) private static var releaseRequests = 0
+        static var requests: Int { lock.withLock { releaseRequests } }
 
-        // Whichever copy is opened, the lookup is by release, not by instance.
-        #expect(try await store.releaseDetail(releaseID: 500) != nil)
-        #expect(try await store.releaseDetail(releaseID: 501) == nil)
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+        override func startLoading() {
+            Self.lock.withLock { Self.releaseRequests += 1 }
+            let body = """
+            {"id":600,"title":"Fear of Music","year":1979,"uri":"https://www.discogs.com/release/600",
+             "artists":[{"name":"Talking Heads","join":""}],"labels":[],"formats":[],"genres":[],"styles":[]}
+            """
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        override func stopLoading() {}
+    }
+
+    @Test("Two copies of one release share one detail record and one request")
+    @MainActor
+    func sharedAcrossInstances() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CountingReleaseProtocol.self]
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
+        try tokenStore.save("test-token")
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
+        let container = try AppServices.makeModelContainer(inMemory: true)
+        let services = AppServices(
+            modelContainer: container,
+            tokenStore: tokenStore,
+            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
+            sessionConfiguration: configuration,
+            defaults: testDefaults.defaults
+        )
+        let copies = try [1, 2].map { instanceID in
+            let json = """
+            {"id":600,"instance_id":\(instanceID),"folder_id":1,"rating":0,
+             "basic_information":{"id":600,"title":"Fear of Music","year":1979,
+             "artists":[{"name":"Talking Heads","join":""}],"labels":[],"formats":[],"genres":[],"styles":[]}}
+            """
+            return try DiscogsClient.makeDecoder().decode(CollectionItem.self, from: Data(json.utf8))
+        }
+        try await services.store.upsert(copies)
+        let before = CountingReleaseProtocol.requests
+
+        // Each copy's page has a loader of its own, and both look the release up by its id.
+        for _ in copies {
+            let loader = ReleaseDetailLoader(services: services)
+            await loader.load(releaseID: 600)
+            #expect(loader.snapshot?.title == "Fear of Music")
+        }
+
+        #expect(CountingReleaseProtocol.requests - before == 1, "the second copy reuses the first one's details")
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<CachedReleaseDetail>()) == 1)
     }
 }

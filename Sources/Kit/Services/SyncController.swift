@@ -36,7 +36,7 @@ final class SyncController {
 
     init(services: AppServices) {
         self.services = services
-        lastSyncedAt = UserDefaults.standard.object(forKey: Self.lastSyncedKey) as? Date
+        lastSyncedAt = services.defaults.object(forKey: Self.lastSyncedKey) as? Date
     }
 
     /// A refresh on launch is wanted, but not on every window that opens seconds apart.
@@ -145,7 +145,7 @@ final class SyncController {
         errorMessage = nil
         isOffline = false
         progress = nil
-        UserDefaults.standard.removeObject(forKey: Self.lastSyncedKey)
+        services.defaults.removeObject(forKey: Self.lastSyncedKey)
     }
 
     enum ResetError: LocalizedError {
@@ -193,7 +193,7 @@ final class SyncController {
             services.rememberUsername(summary.username)
             isOffline = false
             lastSyncedAt = Date()
-            UserDefaults.standard.set(lastSyncedAt, forKey: Self.lastSyncedKey)
+            services.defaults.set(lastSyncedAt, forKey: Self.lastSyncedKey)
 
             // The collection is correct now. Covers are a pre-fetch — the grid loads what it shows
             // on demand — so they warm in the background rather than holding the sync open.

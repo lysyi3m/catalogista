@@ -6,6 +6,8 @@ import Testing
 @Suite("Sign out", .serialized)
 @MainActor
 struct SignOutTests {
+    private let testDefaults = TestDefaults()
+
     /// Serves a two-page collection slowly, so a sign-out lands while the sync is mid-stream.
     final class SlowCollectionProtocol: URLProtocol, @unchecked Sendable {
         override class func canInit(with request: URLRequest) -> Bool {
@@ -70,7 +72,8 @@ struct SignOutTests {
                 session: URLSession(configuration: imageConfiguration),
                 maximumConcurrentDownloads: 1
             ),
-            sessionConfiguration: configuration
+            sessionConfiguration: configuration,
+            defaults: testDefaults.defaults
         )
         return (services, tokenStore)
     }
@@ -95,12 +98,16 @@ struct SignOutTests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SlowIdentityProtocol.self]
         let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         let services = AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
             tokenStore: tokenStore,
             imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
-            sessionConfiguration: configuration
+            sessionConfiguration: configuration,
+            defaults: testDefaults.defaults
         )
 
         let signIn = Task { try await services.signIn(token: "test-token") }
@@ -160,7 +167,8 @@ struct SignOutTests {
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
             tokenStore: tokenStore,
             imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
-            sessionConfiguration: configuration
+            sessionConfiguration: configuration,
+            defaults: testDefaults.defaults
         )
         let gate = GatedIdentityProtocol.Gate()
         GatedIdentityProtocol.gate = gate
@@ -175,13 +183,11 @@ struct SignOutTests {
 
     @Test("A username lookup that returns after a disconnect does not remember the old account")
     func lateUsernameLosesToDisconnect() async throws {
-        // Read at init, so cleared first: the lookup has to reach Discogs.
-        UserDefaults.standard.removeObject(forKey: "discogsUsername")
         let (services, tokenStore, gate) = try makeGatedServices()
         defer {
             try? tokenStore.delete()
+            testDefaults.discard()
             GatedIdentityProtocol.gate = nil
-            UserDefaults.standard.removeObject(forKey: "discogsUsername")
         }
 
         let lookup = Task { try await services.username() }
@@ -191,7 +197,7 @@ struct SignOutTests {
         _ = await lookup.result
 
         #expect(services.accountUsername == nil)
-        #expect(UserDefaults.standard.string(forKey: "discogsUsername") == nil)
+        #expect(testDefaults.defaults.string(forKey: "discogsUsername") == nil)
     }
 
     @Test("Writes settling while a sync runs share one sync that starts after it")
@@ -199,6 +205,7 @@ struct SignOutTests {
         let (services, tokenStore, gate) = try makeGatedServices()
         defer {
             try? tokenStore.delete()
+            testDefaults.discard()
             GatedIdentityProtocol.gate = nil
         }
         let controller = services.syncController
@@ -223,7 +230,10 @@ struct SignOutTests {
     @Test("Signing out does not wait for the cover backlog")
     func signOutDoesNotDrainCovers() async throws {
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
 
         // The sync ends with two covers queued behind a single slow slot: about 0.8 s to drain.
         #expect(await services.syncController.sync())
@@ -237,7 +247,10 @@ struct SignOutTests {
     @Test("A record page that finishes loading after sign-out writes nothing")
     func detailAfterSignOutIsDropped() async throws {
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
 
         let loader = ReleaseDetailLoader(services: services)
         let load = Task { await loader.load(releaseID: 500) }
@@ -253,7 +266,10 @@ struct SignOutTests {
     @Test("Signing out forgets the old account's sync state")
     func signOutForgetsSyncState() async throws {
         let (services, tokenStore) = try makeServices()
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
 
         #expect(await services.syncController.sync())
         #expect(services.syncController.lastSyncedAt != nil)
@@ -272,12 +288,16 @@ struct SignOutTests {
 
         let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
         try tokenStore.save("test-token")
-        defer { try? tokenStore.delete() }
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         let services = AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
             tokenStore: tokenStore,
             imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
-            sessionConfiguration: configuration
+            sessionConfiguration: configuration,
+            defaults: testDefaults.defaults
         )
 
         let sync = Task { await services.syncController.sync() }

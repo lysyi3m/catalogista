@@ -20,6 +20,9 @@ public final class AppServices {
     /// How API requests are sent. Ephemeral, so no response outlives the process in a URL cache or
     /// cookie store: disconnecting has to leave nothing of the collection behind (`PRIVACY.md`).
     private let sessionConfiguration: URLSessionConfiguration
+    private let clientConfiguration: DiscogsConfiguration
+    /// Where the username and the last sync time are remembered.
+    @ObservationIgnored let defaults: UserDefaults
 
     /// Bumped when the account disconnects. Work that started under an earlier value finished for
     /// an account that is gone, and must not write to the cache. Checked on the main actor before
@@ -69,7 +72,7 @@ public final class AppServices {
     /// The username the token belongs to, resolved once and remembered.
     func username() async throws -> String {
         if let cachedUsername { return cachedUsername }
-        if let stored = UserDefaults.standard.string(forKey: Self.usernameKey), !stored.isEmpty {
+        if let stored = defaults.string(forKey: Self.usernameKey), !stored.isEmpty {
             cachedUsername = stored
             return stored
         }
@@ -88,7 +91,7 @@ public final class AppServices {
     func rememberUsername(_ username: String) {
         cachedUsername = username
         accountUsername = username
-        UserDefaults.standard.set(username, forKey: Self.usernameKey)
+        defaults.set(username, forKey: Self.usernameKey)
     }
 
     public convenience init(modelContainer: ModelContainer) {
@@ -96,22 +99,29 @@ public final class AppServices {
     }
 
     /// Full initializer, kept internal so the public surface does not expose the services it wires
-    /// together. Tests use it to inject a temporary cache directory or Keychain account.
+    /// together. Tests use it to inject a temporary cache directory, Keychain account or defaults
+    /// domain, or a client that does not retry.
     init(
         modelContainer: ModelContainer,
         tokenStore: TokenStore = TokenStore(),
         imageCache: ImageCache = ImageCache(),
-        sessionConfiguration: URLSessionConfiguration = .ephemeral
+        sessionConfiguration: URLSessionConfiguration = .ephemeral,
+        clientConfiguration: DiscogsConfiguration = DiscogsConfiguration(userAgent: DiscogsUserAgent.value),
+        defaults: UserDefaults = .standard
     ) {
         self.modelContainer = modelContainer
         self.tokenStore = tokenStore
         self.imageCache = imageCache
         self.sessionConfiguration = sessionConfiguration
+        self.clientConfiguration = clientConfiguration
+        self.defaults = defaults
         self.store = CollectionStore(modelContainer: modelContainer)
         let storedToken = (try? tokenStore.read()).flatMap { $0 }
-        self.client = storedToken.map { Self.makeClient(token: $0, configuration: sessionConfiguration) }
+        self.client = storedToken.map {
+            Self.makeClient(token: $0, configuration: clientConfiguration, session: sessionConfiguration)
+        }
         self.maskedToken = storedToken.map(Self.mask)
-        self.accountUsername = UserDefaults.standard.string(forKey: Self.usernameKey)
+        self.accountUsername = defaults.string(forKey: Self.usernameKey)
     }
 
     /// Keeps the first and last few characters, which is enough to tell two tokens apart.
@@ -147,7 +157,7 @@ public final class AppServices {
     /// Keychain.
     @discardableResult
     func signIn(token: String) async throws -> Identity {
-        let candidate = Self.makeClient(token: token, configuration: sessionConfiguration)
+        let candidate = Self.makeClient(token: token, configuration: clientConfiguration, session: sessionConfiguration)
         let generation = accountGeneration
         let identity = try await candidate.identity()
         // Disconnected while the check was out: that disconnect is the later request, and it wins.
@@ -191,7 +201,7 @@ public final class AppServices {
         cachedUsername = nil
         accountUsername = nil
         maskedToken = nil
-        UserDefaults.standard.removeObject(forKey: Self.usernameKey)
+        defaults.removeObject(forKey: Self.usernameKey)
         syncController.forgetAccount()
     }
 
@@ -215,11 +225,11 @@ public final class AppServices {
         return CollectionSyncer(client: client, store: store, imageCache: imageCache)
     }
 
-    private static func makeClient(token: String, configuration: URLSessionConfiguration) -> DiscogsClient {
-        DiscogsClient(
-            token: token,
-            configuration: DiscogsConfiguration(userAgent: DiscogsUserAgent.value),
-            session: URLSession(configuration: configuration)
-        )
+    private static func makeClient(
+        token: String,
+        configuration: DiscogsConfiguration,
+        session: URLSessionConfiguration
+    ) -> DiscogsClient {
+        DiscogsClient(token: token, configuration: configuration, session: URLSession(configuration: session))
     }
 }

@@ -13,6 +13,7 @@ struct TokenMaskingTests {
         #expect(masked.hasSuffix("mnop"))
         #expect(!masked.contains("WXYZ1234567890ijkl"), "the middle must not survive")
         #expect(masked.contains("•"))
+        #expect(masked != token)
     }
 
     @Test("A short token is hidden entirely rather than mostly revealed")
@@ -21,11 +22,5 @@ struct TokenMaskingTests {
             let masked = AppServices.mask(token)
             #expect(masked.allSatisfy { $0 == "•" }, "\(token) leaked characters")
         }
-    }
-
-    @Test("Masking never returns the token itself")
-    func neverReturnsInput() {
-        let token = "0123456789abcdefghijklmnopqrstuvwxyzABCD"
-        #expect(AppServices.mask(token) != token)
     }
 }
