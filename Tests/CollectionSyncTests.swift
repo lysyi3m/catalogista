@@ -171,7 +171,11 @@ struct CollectionSyncTests {
         imageConfiguration.protocolClasses = [ImageCacheTests.SlowProtocol.self]
         let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
         try tokenStore.save("test-token")
-        defer { try? tokenStore.delete() }
+        let testDefaults = TestDefaults()
+        defer {
+            try? tokenStore.delete()
+            testDefaults.discard()
+        }
         let services = AppServices(
             modelContainer: try AppServices.makeModelContainer(inMemory: true),
             tokenStore: tokenStore,
@@ -179,7 +183,8 @@ struct CollectionSyncTests {
                 directory: URL.temporaryDirectory.appending(path: UUID().uuidString),
                 session: URLSession(configuration: imageConfiguration)
             ),
-            sessionConfiguration: configuration
+            sessionConfiguration: configuration,
+            defaults: testDefaults.defaults
         )
         let controller = services.syncController
 
