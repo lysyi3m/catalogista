@@ -110,7 +110,9 @@ struct ReleaseDetailSnapshot: Sendable, Hashable, Identifiable {
     /// `2025-00-00` for a year-only release all occur. Zero month and day components mean "not
     /// known", so they are dropped rather than clamped to January 1st. Anything unparseable is
     /// shown as Discogs sent it.
-    var releasedDisplay: String? {
+    var releasedDisplay: String? { releasedDisplay(locale: .autoupdatingCurrent) }
+
+    func releasedDisplay(locale: Locale) -> String? {
         guard let raw = released?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
 
         let parts = raw.split(separator: "-").map(String.init)
@@ -125,12 +127,13 @@ struct ReleaseDetailSnapshot: Sendable, Hashable, Identifiable {
             }
         }
 
-        guard let date = Calendar.current.date(from: components) else { return raw }
+        // Discogs dates are Gregorian; the user's own calendar applies only to the display.
+        guard let date = Calendar(identifier: .gregorian).date(from: components) else { return raw }
         if components.day != nil {
-            return date.formatted(date: .abbreviated, time: .omitted)
+            return date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, locale: locale, calendar: locale.calendar))
         }
         if components.month != nil {
-            return date.formatted(.dateTime.month(.abbreviated).year())
+            return date.formatted(Date.FormatStyle(locale: locale, calendar: locale.calendar).month(.abbreviated).year())
         }
         return String(year)
     }

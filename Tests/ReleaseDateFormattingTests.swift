@@ -25,27 +25,31 @@ struct ReleaseDateFormattingTests {
         )
     }
 
+    /// Pinned, so the expected text does not depend on the machine running the tests.
+    private let english = Locale(identifier: "en_US")
+
     @Test("A full date formats at day precision")
-    func fullDate() throws {
-        let formatted = try #require(snapshot(released: "2025-02-28").releasedDisplay)
-        #expect(formatted.contains("2025"))
-        #expect(formatted.contains("Feb"))
-        #expect(formatted.contains("28"))
+    func fullDate() {
+        #expect(snapshot(released: "2025-02-28").releasedDisplay(locale: english) == "Feb 28, 2025")
     }
 
     @Test("A year-month date formats without inventing a day")
-    func yearMonth() throws {
-        let formatted = try #require(snapshot(released: "1980-10").releasedDisplay)
-        #expect(formatted.contains("1980"))
-        #expect(formatted.contains("Oct"))
-        #expect(!formatted.contains("1,"), "no day should appear")
+    func yearMonth() {
+        #expect(snapshot(released: "1980-10").releasedDisplay(locale: english) == "Oct 1980")
     }
 
     @Test("Zero month and day mean unknown, not January 1st")
     func zeroComponents() {
         // Discogs sends this shape for a release it only knows the year of.
-        #expect(snapshot(released: "2025-00-00").releasedDisplay == "2025")
-        #expect(snapshot(released: "1977-05-00").releasedDisplay?.contains("May") == true)
+        #expect(snapshot(released: "2025-00-00").releasedDisplay(locale: english) == "2025")
+        #expect(snapshot(released: "1977-05-00").releasedDisplay(locale: english) == "May 1977")
+    }
+
+    @Test("The date follows the reader's locale")
+    func localized() {
+        let german = snapshot(released: "2025-02-28").releasedDisplay(locale: Locale(identifier: "de_DE"))
+        #expect(german != "Feb 28, 2025")
+        #expect(german?.contains("2025") == true)
     }
 
     @Test("A bare year stays a bare year")

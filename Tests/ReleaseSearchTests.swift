@@ -62,26 +62,62 @@ struct ReleaseSearchTests {
         #expect(requests.map(\.1) == [1, 2])
     }
 
+    /// Holds a request until the test opens it, then lets it answer as a late response would: the
+    /// wait ignores cancellation, as a network response already on its way does.
+    @MainActor
+    final class Gate {
+        private(set) var isWaiting = false
+        private(set) var hasAnswered = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func wait() async {
+            isWaiting = true
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func open() {
+            continuation?.resume()
+            continuation = nil
+        }
+
+        func markAnswered() { hasAnswered = true }
+    }
+
+    /// Starts `old` and holds it at the gate, runs `new` to completion, then lets `old` answer
+    /// late. Returns once the old answer has had its chance to land.
+    private func runOldAfterNew(
+        _ controller: ReleaseSearchController,
+        old: String,
+        new: String,
+        gate: Gate,
+        newIsDone: () -> Bool
+    ) async throws {
+        controller.search(old)
+        try await waitUntil { gate.isWaiting }
+        controller.search(new)
+        try await waitUntil(newIsDone)
+        gate.open()
+        try await waitUntil { gate.hasAnswered }
+        // The controller applies an answer on the main actor right after it arrives.
+        for _ in 0..<10 { await Task.yield() }
+    }
+
     @Test("A slow earlier search cannot overwrite a newer one's results")
     func staleResponseIsDiscarded() async throws {
         let slowPage = try page(titles: ["Stale Result"])
         let fastPage = try page(titles: ["Fresh Result"])
+        let gate = Gate()
 
         let controller = ReleaseSearchController { query, _ in
-            if query == "slow" {
-                // Lands after the second search has already finished.
-                try await Task.sleep(for: .milliseconds(300))
-                return slowPage
-            }
-            return fastPage
+            guard query == "slow" else { return fastPage }
+            await gate.wait()
+            await gate.markAnswered()
+            return slowPage
         }
 
-        controller.search("slow")
-        controller.search("fast")
-
-        try await waitUntil { controller.results.first?.title == "Fresh Result" }
-        // Give the slow response time to land and do damage, if it still can.
-        try await Task.sleep(for: .milliseconds(400))
+        try await runOldAfterNew(controller, old: "slow", new: "fast", gate: gate) {
+            controller.results.first?.title == "Fresh Result"
+        }
 
         #expect(controller.results.map(\.title) == ["Fresh Result"],
                 "the superseded search must not replace newer results")
@@ -91,20 +127,18 @@ struct ReleaseSearchTests {
     func staleFailureIsDiscarded() async throws {
         struct Boom: Error {}
         let fastPage = try page(titles: ["Fresh Result"])
+        let gate = Gate()
 
         let controller = ReleaseSearchController { query, _ in
-            if query == "doomed" {
-                try await Task.sleep(for: .milliseconds(300))
-                throw Boom()
-            }
-            return fastPage
+            guard query == "doomed" else { return fastPage }
+            await gate.wait()
+            await gate.markAnswered()
+            throw Boom()
         }
 
-        controller.search("doomed")
-        controller.search("fast")
-
-        try await waitUntil { controller.results.first?.title == "Fresh Result" }
-        try await Task.sleep(for: .milliseconds(400))
+        try await runOldAfterNew(controller, old: "doomed", new: "fast", gate: gate) {
+            controller.results.first?.title == "Fresh Result"
+        }
 
         #expect(controller.results.map(\.title) == ["Fresh Result"])
         #expect(controller.state == .loaded(total: 1), "a stale failure must not become the state")
@@ -112,16 +146,18 @@ struct ReleaseSearchTests {
 
     @Test("The newest search's results and total are the ones shown")
     func newestSearchWins() async throws {
+        let gate = Gate()
         let controller = ReleaseSearchController { query, _ in
-            try await Task.sleep(for: .milliseconds(query == "first" ? 200 : 10))
+            if query == "first" {
+                await gate.wait()
+                await gate.markAnswered()
+            }
             return try self.page(titles: ["\(query) hit"], total: query == "first" ? 999 : 7)
         }
 
-        controller.search("first")
-        controller.search("second")
-
-        try await waitUntil { controller.state == .loaded(total: 7) }
-        try await Task.sleep(for: .milliseconds(300))
+        try await runOldAfterNew(controller, old: "first", new: "second", gate: gate) {
+            controller.state == .loaded(total: 7)
+        }
 
         #expect(controller.state == .loaded(total: 7))
         #expect(controller.results.first?.title == "second hit")
