@@ -23,6 +23,8 @@ struct CollectionView: View {
     /// Where a copy can be moved, for the context menu. See `CollectionFolders.destinations`.
     private let destinations: [FolderSnapshot]
     private let onMove: (CachedCollectionItem, Int) -> Void
+    /// Reports how many copies the folder and search leave showing.
+    private let onCountChange: (Int) -> Void
 
     @State private var hoveredID: PersistentIdentifier?
     /// Room under a short list, and the grid's visible height. Both keep the credit on the bottom
@@ -41,7 +43,8 @@ struct CollectionView: View {
         destinations: [FolderSnapshot],
         onSelect: @escaping (CachedCollectionItem) -> Void,
         onMove: @escaping (CachedCollectionItem, Int) -> Void,
-        onRequestRemove: @escaping (CachedCollectionItem) -> Void
+        onRequestRemove: @escaping (CachedCollectionItem) -> Void,
+        onCountChange: @escaping (Int) -> Void
     ) {
         var descriptor = FetchDescriptor<CachedCollectionItem>()
         descriptor.sortBy = sort.sortDescriptors(direction)
@@ -58,6 +61,7 @@ struct CollectionView: View {
         self.onRequestRemove = onRequestRemove
         self.destinations = destinations
         self.onMove = onMove
+        self.onCountChange = onCountChange
     }
 
     /// The cover alone, at most 72pt, so the sidebar stays visible under the pointer.
@@ -87,6 +91,12 @@ struct CollectionView: View {
     }
 
     var body: some View {
+        content
+            .onChange(of: items.count, initial: true) { onCountChange(items.count) }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if items.isEmpty, !searchQuery.isEmpty {
             // Shows only the query, no Discogs data, so there is nothing to credit.
             ContentUnavailableView.search(text: searchQuery)

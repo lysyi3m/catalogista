@@ -77,17 +77,27 @@ struct CoverImageView: View {
     }
 
     /// Everything the decoded image depends on. The scale is part of it: moving the window to a
-    /// screen of another scale needs a decode at the new size.
+    /// screen of another scale needs a decode at the new size. So is the image revision: a cover
+    /// that failed loads again once a sync has fetched it, and one decoded before Reset Cache
+    /// loads again from the refilled cache.
     private struct TaskKey: Hashable {
         let releaseID: Int
         let kind: ImageCache.Kind
         let url: String?
         let edge: CGFloat
         let scale: CGFloat
+        let revision: Int
     }
 
     private var taskKey: TaskKey {
-        TaskKey(releaseID: releaseID, kind: kind, url: remoteURL, edge: bucketedEdge, scale: displayScale)
+        TaskKey(
+            releaseID: releaseID,
+            kind: kind,
+            url: remoteURL,
+            edge: bucketedEdge,
+            scale: displayScale,
+            revision: services.imageRevision
+        )
     }
 
     /// Loads the image for `key`, and publishes the outcome only while `key` is still the current

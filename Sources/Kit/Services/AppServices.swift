@@ -32,6 +32,13 @@ public final class AppServices {
 
     func noteFolderChange() { folderRevision += 1 }
 
+    /// Bumped when covers land on disk outside a view's own load: the sync's prefetch, which also
+    /// refills the cache after Reset Cache. A cover that failed, or that shows art from before a
+    /// reset, loads again.
+    private(set) var imageRevision = 0
+
+    func noteImagesChanged() { imageRevision += 1 }
+
     /// Copies with a move or removal under way. Every editor claims a copy here first, so a removal
     /// cannot start from the grid while the record page is still moving that copy, acting on a
     /// folder Discogs has not confirmed.

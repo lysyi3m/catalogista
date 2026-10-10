@@ -162,6 +162,42 @@ struct CollectionSyncTests {
         #expect(try await store.fields().map(\.name) == ["Media"])
     }
 
+    @Test("A sync that fails late still tells the folder counts to recount, and fetched covers tell covers to reload")
+    @MainActor
+    func syncSignalsCacheChanges() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        let imageConfiguration = URLSessionConfiguration.ephemeral
+        imageConfiguration.protocolClasses = [ImageCacheTests.SlowProtocol.self]
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
+        try tokenStore.save("test-token")
+        defer { try? tokenStore.delete() }
+        let services = AppServices(
+            modelContainer: try AppServices.makeModelContainer(inMemory: true),
+            tokenStore: tokenStore,
+            imageCache: ImageCache(
+                directory: URL.temporaryDirectory.appending(path: UUID().uuidString),
+                session: URLSession(configuration: imageConfiguration)
+            ),
+            sessionConfiguration: configuration
+        )
+        let controller = services.syncController
+
+        StubProtocol.serve(instanceIDs: [1], claimingItems: 1)
+        #expect(await controller.sync())
+        #expect(controller.syncsEnded == 1)
+        let deadline = ContinuousClock.now + .seconds(2)
+        while services.imageRevision == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(services.imageRevision == 1, "the prefetched cover is announced")
+
+        // The pages are written before the fields request fails.
+        StubProtocol.serve(instanceIDs: [1], claimingItems: 1, fields: nil)
+        #expect(await controller.sync() == false)
+        #expect(controller.syncsEnded == 2)
+    }
+
     @Test("A sync cancelled while the fields request is out fails before it deletes anything")
     func cancelledDuringFieldsDeletesNothing() async throws {
         let store = try makeStore()
