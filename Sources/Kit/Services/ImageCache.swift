@@ -205,12 +205,7 @@ actor ImageCache {
                 directoryHint: .notDirectory
             )
         }
-        // Images Discogs no longer lists, and files left by an earlier order of the same images.
-        let current = Set(destinations.map(\.lastPathComponent))
-        for file in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        where !current.contains(file.lastPathComponent) {
-            try? FileManager.default.removeItem(at: file)
-        }
+        moveCachedImages(in: folder, to: Dictionary(zip(remoteURLs.map(\.absoluteString), destinations)) { first, _ in first })
 
         let files = await withTaskGroup(of: (Int, URL?).self) { group in
             for (index, pair) in zip(destinations, remoteURLs).enumerated() {
@@ -222,9 +217,41 @@ actor ImageCache {
             for await (index, file) in group { files[index] = file }
             return files.compactMap(\.self)
         }
+        // Only now, so a file stays on disk until its replacement is: images Discogs no longer
+        // lists.
+        let current = Set(destinations.map(\.lastPathComponent))
+        for file in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where !current.contains(file.lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
         try Task.checkCancellation()
         guard !files.isEmpty else { throw CacheError.notAnImage }
         return files
+    }
+
+    /// Renames each cached image to the name its source has now. A file's name holds the title,
+    /// the position and the count, so one image added on Discogs renames them all; matched by the
+    /// recorded source, a renamed file is not downloaded again and stays available offline.
+    private func moveCachedImages(in folder: URL, to destinations: [String: URL]) {
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        let moves = files.compactMap { file -> (from: URL, to: URL)? in
+            guard let source = Self.recordedSource(of: file), let destination = destinations[source],
+                  destination.lastPathComponent != file.lastPathComponent
+            else { return nil }
+            return (file, destination)
+        }
+        // Through temporary names first, so two images that swap places do not overwrite each other.
+        let staged = moves.compactMap { move -> (from: URL, to: URL)? in
+            let temporary = folder.appending(path: UUID().uuidString, directoryHint: .notDirectory)
+            guard (try? FileManager.default.moveItem(at: move.from, to: temporary)) != nil else { return nil }
+            return (temporary, move.to)
+        }
+        for move in staged {
+            try? FileManager.default.removeItem(at: move.to)
+            if (try? FileManager.default.moveItem(at: move.from, to: move.to)) == nil {
+                try? FileManager.default.removeItem(at: move.from)
+            }
+        }
     }
 
     /// Downloads `remoteURL` into `destination`, sharing a download already in flight for the same

@@ -570,6 +570,26 @@ struct ImageCacheTests {
         #expect(onDisk == [remaining[0].lastPathComponent])
     }
 
+    @Test("An image added on Discogs keeps the cached ones available offline")
+    func releaseImagesSurviveAFailedUpdate() async throws {
+        CountingProtocol.reset()
+        defer { CountingProtocol.reset() }
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        let front = URL(string: "https://i.discogs.com/front.jpeg")!
+        let back = URL(string: "https://i.discogs.com/back.jpeg")!
+        let label = URL(string: "https://i.discogs.com/label.jpeg")!
+        _ = try await cache.releaseImages(releaseID: 8, title: "Record", remoteURLs: [front, back])
+
+        // Offline: every download fails.
+        CountingProtocol.serve(body: Data("<html>".utf8))
+        let files = try await cache.releaseImages(releaseID: 8, title: "Record", remoteURLs: [label, back, front])
+        #expect(files.map(\.lastPathComponent) == ["Record 2 of 3.jpeg", "Record 3 of 3.jpeg"])
+        #expect(files.map { ImageCache.recordedSource(of: $0) } == [back.absoluteString, front.absoluteString])
+    }
+
     @Test("A release's images go with its covers when it leaves the collection")
     func releaseImagesArePruned() async throws {
         CountingProtocol.reset()
