@@ -176,36 +176,42 @@ actor CollectionSyncer {
     /// fail a sync that otherwise succeeded, and the next refresh will try again.
     @discardableResult
     func warmArtwork(_ targets: [ArtworkTarget]) async -> Int {
-        await withTaskGroup(of: Bool.self) { group in
-            // Two copies of one release share a cover; one download serves both.
-            var seen = Set<String>()
-            for target in targets where seen.insert("\(target.kind.rawValue)/\(target.releaseID)").inserted {
-                group.addTask { [imageCache] in
-                    // Checked against the source, so art whose URL changed is downloaded again and
-                    // covers follow Discogs on the same schedule as the rest of the collection.
-                    if await imageCache.isCached(
-                        releaseID: target.releaseID,
-                        kind: target.kind,
-                        source: target.url
-                    ) {
-                        return false
-                    }
-                    do {
-                        try await imageCache.localURL(
-                            releaseID: target.releaseID,
-                            kind: target.kind,
-                            remoteURL: target.url
-                        )
-                        return true
-                    } catch {
-                        return false
-                    }
-                }
-            }
+        // Two copies of one release share a cover; one download serves both.
+        var seen = Set<String>()
+        var pending = targets.filter { seen.insert("\($0.kind.rawValue)/\($0.releaseID)").inserted }.makeIterator()
 
+        return await withTaskGroup(of: Bool.self) { [imageCache] group in
+            // A few at a time rather than a task per cover: the image cache has this many download
+            // slots, so more tasks would only wait in its queue, and a cancelled warmer would leave
+            // the whole backlog to unwind.
+            for _ in 0..<Self.warmingWidth {
+                guard let target = pending.next() else { break }
+                group.addTask { await Self.warm(target, in: imageCache) }
+            }
             var fetched = 0
-            for await didFetch in group where didFetch { fetched += 1 }
+            for await didFetch in group {
+                if didFetch { fetched += 1 }
+                guard !Task.isCancelled, let target = pending.next() else { continue }
+                group.addTask { await Self.warm(target, in: imageCache) }
+            }
             return fetched
+        }
+    }
+
+    private static let warmingWidth = 6
+
+    /// Downloads one cover unless it is already on disk. True when it downloaded.
+    private static func warm(_ target: ArtworkTarget, in imageCache: ImageCache) async -> Bool {
+        // Checked against the source, so art whose URL changed is downloaded again and covers
+        // follow Discogs on the same schedule as the rest of the collection.
+        if await imageCache.isCached(releaseID: target.releaseID, kind: target.kind, source: target.url) {
+            return false
+        }
+        do {
+            try await imageCache.localURL(releaseID: target.releaseID, kind: target.kind, remoteURL: target.url)
+            return true
+        } catch {
+            return false
         }
     }
 }
