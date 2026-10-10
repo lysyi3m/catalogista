@@ -112,6 +112,114 @@ struct SignOutTests {
         #expect(try tokenStore.read() == nil, "nothing may be saved for the abandoned sign-in")
     }
 
+    /// Holds the identity request until the test opens the gate, so a disconnect or another sync
+    /// lands at a known point.
+    final class GatedIdentityProtocol: URLProtocol, @unchecked Sendable {
+        nonisolated(unsafe) static var gate: Gate?
+
+        final class Gate: @unchecked Sendable {
+            let opened = DispatchSemaphore(value: 0)
+            private let lock = NSLock()
+            private var started = false
+            var isStarted: Bool { lock.withLock { started } }
+            func markStarted() { lock.withLock { started = true } }
+        }
+
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+        override func startLoading() {
+            let path = request.url?.path ?? ""
+            let body: String
+            if path.hasSuffix("/oauth/identity") {
+                if let gate = Self.gate {
+                    gate.markStarted()
+                    gate.opened.wait()
+                }
+                body = #"{"id":1,"username":"tester","resource_url":"https://api.discogs.com"}"#
+            } else if path.hasSuffix("/collection/folders") {
+                body = #"{"folders":[{"id":1,"name":"Uncategorized","count":0}]}"#
+            } else if path.hasSuffix("/collection/fields") {
+                body = #"{"fields":[]}"#
+            } else {
+                body = #"{"pagination":{"page":1,"pages":1,"per_page":100,"items":0},"releases":[]}"#
+            }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        override func stopLoading() {}
+    }
+
+    private func makeGatedServices() throws -> (services: AppServices, tokenStore: TokenStore, gate: GatedIdentityProtocol.Gate) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [GatedIdentityProtocol.self]
+        let tokenStore = TokenStore(service: "com.mlkshkvch.catalogista.tests.\(UUID().uuidString)")
+        try tokenStore.save("test-token")
+        let services = AppServices(
+            modelContainer: try AppServices.makeModelContainer(inMemory: true),
+            tokenStore: tokenStore,
+            imageCache: ImageCache(directory: URL.temporaryDirectory.appending(path: UUID().uuidString)),
+            sessionConfiguration: configuration
+        )
+        let gate = GatedIdentityProtocol.Gate()
+        GatedIdentityProtocol.gate = gate
+        return (services, tokenStore, gate)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(condition())
+    }
+
+    @Test("A username lookup that returns after a disconnect does not remember the old account")
+    func lateUsernameLosesToDisconnect() async throws {
+        // Read at init, so cleared first: the lookup has to reach Discogs.
+        UserDefaults.standard.removeObject(forKey: "discogsUsername")
+        let (services, tokenStore, gate) = try makeGatedServices()
+        defer {
+            try? tokenStore.delete()
+            GatedIdentityProtocol.gate = nil
+            UserDefaults.standard.removeObject(forKey: "discogsUsername")
+        }
+
+        let lookup = Task { try await services.username() }
+        try await waitUntil { gate.isStarted }
+        try await services.signOut()
+        gate.opened.signal()
+        _ = await lookup.result
+
+        #expect(services.accountUsername == nil)
+        #expect(UserDefaults.standard.string(forKey: "discogsUsername") == nil)
+    }
+
+    @Test("Writes settling while a sync runs share one sync that starts after it")
+    func concurrentWritesShareAFreshSync() async throws {
+        let (services, tokenStore, gate) = try makeGatedServices()
+        defer {
+            try? tokenStore.delete()
+            GatedIdentityProtocol.gate = nil
+        }
+        let controller = services.syncController
+
+        let refresh = Task { await controller.sync() }
+        try await waitUntil { gate.isStarted }
+        let first = Task { await controller.syncAfterWrite() }
+        let second = Task { await controller.syncAfterWrite() }
+        // Both start waiting on the refresh before it ends.
+        await Task.yield()
+        await Task.yield()
+        // The syncs the writes wait for are not held.
+        GatedIdentityProtocol.gate = nil
+        gate.opened.signal()
+
+        #expect(await refresh.value)
+        #expect(await first.value, "a refresh in flight is not a failed reconciliation")
+        #expect(await second.value)
+        #expect(controller.isSyncing == false)
+    }
+
     @Test("Signing out does not wait for the cover backlog")
     func signOutDoesNotDrainCovers() async throws {
         let (services, tokenStore) = try makeServices()

@@ -101,6 +101,22 @@ struct CollectionStoreTests {
         await store.endSync()
     }
 
+    @Test("Moving a just-added copy keeps it safe from the sync that predates the add")
+    func addThenMoveDuringSync() async throws {
+        let store = try makeStore()
+
+        await store.beginSync()
+        try await store.insert(try makePending(instanceID: -8))
+        try await store.reassignInstanceID(from: -8, to: 9)
+        await store.settleWrites([-8, 9])
+        try await store.moveItem(instanceID: 9, toFolderID: 5)
+        // The sync's pages predate the add, so they do not list the copy.
+        #expect(try await store.pruneItems(keeping: []) == 0)
+        await store.endSync()
+
+        #expect(try await store.item(instanceID: 9)?.folderID == 5)
+    }
+
     @Test("A removal already in flight when a sync starts is not put back by its pages")
     func removalInFlightBeforeSync() async throws {
         let store = try makeStore()

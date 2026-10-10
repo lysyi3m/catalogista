@@ -67,7 +67,11 @@ public final class AppServices {
             return stored
         }
         guard let client else { throw DiscogsError.unauthorized(message: "Connect to Discogs to continue.") }
+        let generation = accountGeneration
         let identity = try await client.identity()
+        // The account disconnected while the lookup was out. Remembered now, the old name would
+        // outlive sign-out, or replace the next account's.
+        guard accountGeneration == generation else { throw CancellationError() }
         rememberUsername(identity.username)
         return identity.username
     }
