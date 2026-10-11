@@ -4,7 +4,7 @@ import Foundation
 ///
 /// The Discogs API requires a `User-Agent` that uniquely identifies the client and carries a
 /// contact. Generic agents are throttled harder. `userAgent(appVersion:contact:)` builds a
-/// conforming value from `contact`.
+/// conforming value from the app version and `contact`.
 public struct DiscogsConfiguration: Sendable {
     /// API root. Discogs API v2.
     public var baseURL: URL
@@ -40,9 +40,10 @@ public struct DiscogsConfiguration: Sendable {
     /// Contact published in the `User-Agent`, so Discogs can reach the app's author.
     public static let contact = "https://github.com/lysyi3m/catalogista"
 
-    /// Builds the required `User-Agent` for a given app version and contact.
+    /// Builds the required `User-Agent` for a given app version and contact. The version has no
+    /// default: the caller reads it from its own bundle.
     public static func userAgent(
-        appVersion: String = "1.0",
+        appVersion: String,
         contact: String = DiscogsConfiguration.contact
     ) -> String {
         "Catalogista/\(appVersion) +\(contact)"
