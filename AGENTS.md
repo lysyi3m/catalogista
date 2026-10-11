@@ -68,7 +68,8 @@ contradicts a rule here, the repo-specific rule wins — and say so when you not
 ## Discogs API
 
 - Base `https://api.discogs.com`. Auth: Personal Access Token — `Authorization: Discogs token=<PAT>`.
-- Required `User-Agent: Catalogista/1.0 +<contact>`; generic agents get throttled harder.
+- Required `User-Agent: Catalogista/<version> +<contact>`, with the version from
+  `MARKETING_VERSION`; generic agents get throttled harder.
 - Rate limit: 60 req/min authenticated. Route every request through one central throttle that
   reads the `X-Discogs-Ratelimit*` headers, keeps a safety margin, and backs off on 429.
 - Cover art is exempt: the image CDN returns no rate-limit headers and does not consume the
