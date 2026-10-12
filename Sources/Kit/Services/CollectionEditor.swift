@@ -282,7 +282,7 @@ final class CollectionEditor {
             // in the folder the request named. Any other unconfirmed outcome may have been
             // applied. Either way only Discogs can say where the copy is now.
             if discogsError?.didNotReachDiscogs == true, discogsError?.isNotFound == false {
-                try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
+                _ = try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
                 services.noteFolderChange()
                 failed(error, title: "Unable to Move “\(snapshot.title)”")
                 return false
@@ -292,7 +292,7 @@ final class CollectionEditor {
             guard await services.syncController.syncAfterWrite() else {
                 // Unconfirmed, so back to the last folder Discogs confirmed. Left in the new one, a
                 // retry would find the copy already there and succeed without asking Discogs.
-                try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
+                _ = try? await services.store.moveItem(instanceID: instanceID, toFolderID: snapshot.folderID)
                 services.noteFolderChange()
                 failure = Failure(
                     title: "Unable to Confirm Move",

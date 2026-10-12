@@ -6,6 +6,8 @@ SCHEME  := Catalogista
 PACKAGE := DiscogsKit
 LOCAL_XCCONFIG := Config/Local.xcconfig
 TEAM_SETTING   := ^DEVELOPMENT_TEAM = [A-Z0-9]{10}$$
+# A compiler warning fails `make` and CI. Xcode's ⌘R still only warns, so iterating stays fast.
+STRICT := SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES
 
 .DEFAULT_GOAL := help
 .PHONY: help generate local-config test test-package test-app build build-ios clean
@@ -34,19 +36,19 @@ local-config: ## Project machine-local settings from .env into Config/Local.xcco
 test: test-package test-app ## Run every test suite
 
 test-package: ## Run the DiscogsKit unit tests
-	swift test --package-path $(PACKAGE)
+	swift test --package-path $(PACKAGE) -Xswiftc -warnings-as-errors
 
 test-app: generate ## Run the CatalogistaKit tests
 	xcodebuild test -project "$(PROJECT)" -scheme "$(SCHEME)" \
-		-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+		-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO $(STRICT)
 
 build: generate ## Build the app for macOS (unsigned compile check)
 	xcodebuild -project "$(PROJECT)" -scheme "$(SCHEME)" -configuration Debug \
-		-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+		-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO $(STRICT) build
 
 build-ios: generate ## Build the app for the iOS Simulator (unsigned compile check)
 	xcodebuild -project "$(PROJECT)" -scheme "$(SCHEME)" -configuration Debug \
-		-destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+		-destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO $(STRICT) build
 
 clean: ## Remove build artifacts
 	rm -rf build $(PACKAGE)/.build

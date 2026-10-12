@@ -10,6 +10,9 @@ options:
   deploymentTarget:
     macOS: "26.0"
     iOS: "26.0"
+  # Sets LastUpgradeCheck, so Xcode stops offering its "recommended settings" upgrade. Those
+  # settings live in this file instead: the generated project is overwritten on every generate.
+  xcodeVersion: "27.0"
 
 configFiles:
   Debug: Config/Base.xcconfig
@@ -22,6 +25,8 @@ settings:
     CURRENT_PROJECT_VERSION: "2"
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
 
 packages:
