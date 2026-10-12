@@ -125,9 +125,18 @@ commit `.env`.
 
 ## Housekeeping
 
-- **A green build does not prove the change shipped.** A changed default argument in
-  `DiscogsKit` rebuilds the package but not its callers, because the default is materialised at
-  the call site. Verify the installed binary with `Scripts/verify-installed.sh <udid>`.
+- **Debug is the dev app; Release is the App Store app.** Debug builds
+  `com.mlkshkvch.catalogista.dev`, version `<version>-dev`, with `AppIcon-Dev`, so its sandbox
+  container, Keychain item and install stay apart from the App Store app. Use Debug for every
+  build, test, run and simulator install. Release builds only by Product ▸ Archive, which only the
+  owner runs; a pre-build script fails any other Release build. After a change to `AppIcon`, run
+  `Scripts/make-dev-icon.swift`.
+- **After a change to `DiscogsKit`, clean-build before testing.** An incremental build can skip
+  the callers: a changed default argument is materialised at the call site, so the app keeps the
+  old value although the build succeeds.
+- **Never test a failure path with a destructive action on real data.** The dev app works on the
+  owner's live Discogs collection. Trigger failures with a unit test or a throwaway add, never a
+  removal or a move.
 - **Inspect simulator state instead of guessing** — read the app's store and defaults from the
   simulator container.
 - **Check app icons by rendering them.** macOS 26 masks this app's full-bleed square icon, and

@@ -20,7 +20,12 @@ struct TokenStore: Sendable {
     private let service: String
     private let account: String
 
-    init(service: String = "com.mlkshkvch.catalogista", account: String = "discogs-pat") {
+    /// The service defaults to the bundle ID, so the dev app and the App Store app keep separate
+    /// tokens on one machine.
+    init(
+        service: String = Bundle.main.bundleIdentifier ?? "com.mlkshkvch.catalogista",
+        account: String = "discogs-pat"
+    ) {
         self.service = service
         self.account = account
     }
