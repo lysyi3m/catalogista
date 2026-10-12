@@ -10,8 +10,7 @@
       "Bash(make test-app)",
       "Bash(make build)",
       "Bash(make build-ios)",
-      "Bash(xcodegen generate)",
-      "Bash(Scripts/verify-installed.sh:*)"
+      "Bash(xcodegen generate)"
     ]
   }
 }

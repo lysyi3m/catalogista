@@ -111,7 +111,7 @@ struct ReleaseSearchTests {
         let controller = ReleaseSearchController { query, _ in
             guard query == "slow" else { return fastPage }
             await gate.wait()
-            await gate.markAnswered()
+            gate.markAnswered()
             return slowPage
         }
 
@@ -132,7 +132,7 @@ struct ReleaseSearchTests {
         let controller = ReleaseSearchController { query, _ in
             guard query == "doomed" else { return fastPage }
             await gate.wait()
-            await gate.markAnswered()
+            gate.markAnswered()
             throw Boom()
         }
 
@@ -150,7 +150,7 @@ struct ReleaseSearchTests {
         let controller = ReleaseSearchController { query, _ in
             if query == "first" {
                 await gate.wait()
-                await gate.markAnswered()
+                gate.markAnswered()
             }
             return try self.page(titles: ["\(query) hit"], total: query == "first" ? 999 : 7)
         }

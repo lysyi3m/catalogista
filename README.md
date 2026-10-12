@@ -94,7 +94,7 @@ age.
 | `Sources/App/` | The app target: `@main` and assets |
 | `Tests/` | `CatalogistaKit` unit tests (`@testable import CatalogistaKit`) |
 | `Config/` | `Base.xcconfig`, the privacy manifest and the iOS entitlements; `make generate` writes the rest (git-ignored) |
-| `Scripts/` | `verify-installed.sh` — checks the simulator is running the build in DerivedData |
+| `Scripts/` | `make-dev-icon.swift` — renders the Debug app's icon from `AppIcon` |
 
 ## Testing
 
