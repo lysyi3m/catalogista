@@ -35,6 +35,7 @@ public struct ContentView: View {
 
     @State private var selection: CachedCollectionItem?
     @State private var isAdding = false
+    @State private var addSession = AddRecordSession()
     @State private var searchQuery = ""
     @FocusState private var isSearchFocused: Bool
     @State private var editor: CollectionEditor?
@@ -288,8 +289,11 @@ public struct ContentView: View {
                         .modifier(WindowChrome(statusBar: statusBar))
                         #endif
                 }
-                .sheet(isPresented: $isAdding) {
-                    AddRecordView(folderID: folderID)
+                .sheet(isPresented: $isAdding, onDismiss: {
+                    addSession.close(services: services)
+                    addSession = AddRecordSession()
+                }) {
+                    AddRecordView(folderID: folderID, session: addSession)
                         .environment(services)
                         .modelContainer(services.modelContainer)
                 }

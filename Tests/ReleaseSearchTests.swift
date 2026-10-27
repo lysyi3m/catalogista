@@ -62,6 +62,31 @@ struct ReleaseSearchTests {
         #expect(requests.map(\.1) == [1, 2])
     }
 
+    @Test("A page that fails to load keeps the results and waits for Try Again")
+    func failedPageWaitsForRetry() async throws {
+        let first = try page(titles: ["A", "B"], total: 3, number: 1, pages: 2)
+        let second = try page(titles: ["C"], total: 3, number: 2, pages: 2, firstID: 3)
+        var failNextPage = true
+        let controller = ReleaseSearchController { _, number in
+            if number == 2, failNextPage {
+                failNextPage = false
+                throw URLError(.notConnectedToInternet)
+            }
+            return number == 1 ? first : second
+        }
+
+        controller.search("heads")
+        try await waitUntil { controller.results.count == 2 }
+        controller.loadMore()
+        try await waitUntil { controller.loadMoreFailed }
+        #expect(controller.results.count == 2, "the results already shown stay")
+        #expect(controller.hasMore, "the next page is still there to ask for")
+
+        controller.loadMore()
+        #expect(controller.loadMoreFailed == false)
+        try await waitUntil { controller.results.count == 3 }
+    }
+
     /// Holds a request until the test opens it, then lets it answer as a late response would: the
     /// wait ignores cancellation, as a network response already on its way does.
     @MainActor

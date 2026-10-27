@@ -46,43 +46,48 @@ final class CachedReleaseDetail {
     /// When this release was fetched. A release older than `Freshness.maximumAge` is fetched again.
     var fetchedAt: Date
 
-    init(from release: Release) {
-        releaseID = release.id
-        fetchedAt = .now
-        title = release.title
-        artistName = release.artistDisplayName
-        year = release.year
-        released = release.released
-        country = release.country
-        notes = release.notes
-        formatSummary = release.formatDisplayName
-        labelName = release.labels.first?.name
-        catalogNumber = release.labels.first?.catno
-        genres = release.genres
-        styles = release.styles
-        tracks = release.tracklist.map(CachedTrack.init)
-        coverURL = release.primaryImage?.uri
-        imageURLs = Self.imageURLs(of: release)
-        discogsURL = release.uri
+    convenience init(from release: Release, fetchedAt: Date = .now) {
+        self.init(ReleaseDetailSnapshot(from: release, fetchedAt: fetchedAt))
     }
 
-    func update(from release: Release) {
-        fetchedAt = .now
-        title = release.title
-        artistName = release.artistDisplayName
-        year = release.year
-        released = release.released
-        country = release.country
-        notes = release.notes
-        formatSummary = release.formatDisplayName
-        labelName = release.labels.first?.name
-        catalogNumber = release.labels.first?.catno
-        genres = release.genres
-        styles = release.styles
-        tracks = release.tracklist.map(CachedTrack.init)
-        coverURL = release.primaryImage?.uri
-        imageURLs = Self.imageURLs(of: release)
-        discogsURL = release.uri
+    init(_ detail: ReleaseDetailSnapshot) {
+        releaseID = detail.releaseID
+        title = detail.title
+        artistName = detail.artistName
+        year = detail.year
+        released = detail.released
+        country = detail.country
+        notes = detail.notes
+        formatSummary = detail.formatSummary
+        labelName = detail.labelName
+        catalogNumber = detail.catalogNumber
+        genres = detail.genres
+        styles = detail.styles
+        tracks = detail.tracks
+        coverURL = detail.coverURL
+        imageURLs = detail.imageURLs
+        discogsURL = detail.discogsURL
+        fetchedAt = detail.fetchedAt
+    }
+
+    func update(from release: Release, fetchedAt: Date = .now) {
+        let detail = ReleaseDetailSnapshot(from: release, fetchedAt: fetchedAt)
+        title = detail.title
+        artistName = detail.artistName
+        year = detail.year
+        released = detail.released
+        country = detail.country
+        notes = detail.notes
+        formatSummary = detail.formatSummary
+        labelName = detail.labelName
+        catalogNumber = detail.catalogNumber
+        genres = detail.genres
+        styles = detail.styles
+        tracks = detail.tracks
+        coverURL = detail.coverURL
+        imageURLs = detail.imageURLs
+        discogsURL = detail.discogsURL
+        self.fetchedAt = detail.fetchedAt
     }
 
     static func imageURLs(of release: Release) -> [String] {
@@ -172,5 +177,28 @@ extension CachedReleaseDetail {
             discogsURL: discogsURL,
             fetchedAt: fetchedAt
         )
+    }
+}
+
+extension ReleaseDetailSnapshot {
+    /// A release as fetched, for a page that shows it without storing it.
+    init(from release: Release, fetchedAt: Date) {
+        releaseID = release.id
+        title = release.title
+        artistName = release.artistDisplayName
+        year = release.year
+        released = release.released
+        country = release.country
+        notes = release.notes
+        formatSummary = release.formatDisplayName
+        labelName = release.labels.first?.name
+        catalogNumber = release.labels.first?.catno
+        genres = release.genres
+        styles = release.styles
+        tracks = release.tracklist.map(CachedTrack.init)
+        coverURL = release.primaryImage?.uri
+        imageURLs = CachedReleaseDetail.imageURLs(of: release)
+        discogsURL = release.uri
+        self.fetchedAt = fetchedAt
     }
 }

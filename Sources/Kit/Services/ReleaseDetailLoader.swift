@@ -33,14 +33,28 @@ final class ReleaseDetailLoader {
         return snapshot.fetchedAt
     }
 
+    /// The release a preview fetched and did not store, and when. Adding the release stores it, so
+    /// the new record's page does not fetch it again.
+    private(set) var fetched: (release: Release, at: Date)?
+
     private let services: AppServices
+    /// False for a release that is only previewed: what it fetches stays in memory.
+    private let persists: Bool
     /// The clock freshness is judged by. Injectable so tests can age a copy without waiting.
     private let now: () -> Date
 
-    /// - Parameter cached: the copy already on this device, shown from the start. See
-    ///   `cachedDetail(releaseID:in:)`.
-    init(services: AppServices, cached: ReleaseDetailSnapshot? = nil, now: @escaping () -> Date = Date.init) {
+    /// - Parameters:
+    ///   - cached: the copy already on this device, shown from the start. See
+    ///     `cachedDetail(releaseID:in:)`.
+    ///   - persists: whether a fetched release is stored. A preview still reads the cache.
+    init(
+        services: AppServices,
+        cached: ReleaseDetailSnapshot? = nil,
+        persists: Bool = true,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.services = services
+        self.persists = persists
         self.now = now
         if let cached { state = .loaded(cached) }
     }
@@ -87,10 +101,16 @@ final class ReleaseDetailLoader {
                 return
             }
             let release = try await client.release(id: releaseID)
+            let fetchedAt = now()
             // Disconnected while the request was out: the cache is cleared, and this release
             // belongs to the account that is gone.
             guard services.accountGeneration == generation else { return }
-            state = .loaded(try await services.store.upsertReleaseDetail(release))
+            if persists {
+                state = .loaded(try await services.store.upsertReleaseDetail(release, fetchedAt: fetchedAt))
+            } else {
+                fetched = (release, fetchedAt)
+                state = .loaded(ReleaseDetailSnapshot(from: release, fetchedAt: fetchedAt))
+            }
         } catch is CancellationError {
             // The record page was dismissed before the fetch finished.
         } catch {

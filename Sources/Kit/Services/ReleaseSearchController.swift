@@ -24,6 +24,8 @@ final class ReleaseSearchController {
     /// Whether Discogs has more pages of results for `submittedQuery`.
     private(set) var hasMore = false
     private(set) var isLoadingMore = false
+    /// Whether the last request for the next page failed, so the list offers Try Again.
+    private(set) var loadMoreFailed = false
     private var loadedPage = 0
 
     /// Fetches one page of a search. Injected so the ordering can be tested without a network.
@@ -55,6 +57,7 @@ final class ReleaseSearchController {
         state = .searching
         submittedQuery = query
         isLoadingMore = false
+        loadMoreFailed = false
 
         task = Task { [weak self] in
             await self?.run(query, generation: generation)
@@ -65,6 +68,7 @@ final class ReleaseSearchController {
     func loadMore() {
         guard hasMore, !isLoadingMore, case .loaded = state else { return }
         isLoadingMore = true
+        loadMoreFailed = false
         let generation = generation
         let query = submittedQuery
         let page = loadedPage + 1
@@ -110,8 +114,12 @@ final class ReleaseSearchController {
             loadedPage = page
             hasMore = next.pagination.hasNextPage
             state = .loaded(total: next.pagination.items)
+        } catch is CancellationError {
+            // A newer search owns the state now.
         } catch {
-            // The results already shown stay; the button stays to try again.
+            // The results already shown stay.
+            guard generation == self.generation else { return }
+            loadMoreFailed = true
         }
     }
 }

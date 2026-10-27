@@ -372,6 +372,34 @@ actor ImageCache {
         return removed
     }
 
+    /// Deletes every image of these releases, the add sheet's previews. Unlike `prune(keeping:)`,
+    /// it first stops their downloads: one that lands after the delete would leave the image
+    /// behind until the next sync. The caller cancels its own requests first, or they keep
+    /// starting new ones.
+    func discard(releaseIDs: Set<Int>) async {
+        guard !releaseIDs.isEmpty else { return }
+        let files = Set([Kind.thumb, .cover].flatMap { kind in releaseIDs.map { fileURL(releaseID: $0, kind: kind) } })
+        let folders = releaseIDs.map { releaseImagesFolder(releaseID: $0).standardizedFileURL.path + "/" }
+        // Until none is left: while one is awaited, the actor runs other calls, and a request that
+        // was already under way can start another download.
+        while true {
+            let downloads = inFlight.filter { destination, _ in
+                files.contains(destination)
+                    || folders.contains { destination.standardizedFileURL.path.hasPrefix($0) }
+            }
+            guard !downloads.isEmpty else { break }
+            for (destination, download) in downloads {
+                inFlight[destination] = nil
+                download.task.cancel()
+            }
+            for download in downloads.values { _ = try? await download.task.value }
+        }
+        for file in files { try? FileManager.default.removeItem(at: file) }
+        for releaseID in releaseIDs {
+            try? FileManager.default.removeItem(at: releaseImagesFolder(releaseID: releaseID))
+        }
+    }
+
     func removeAll() async throws {
         // Downloads first: otherwise one still in flight writes its file into the deleted
         // directory, and the cache the user asked to clear is not empty.

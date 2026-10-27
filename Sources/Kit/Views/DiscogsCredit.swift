@@ -62,8 +62,9 @@ struct DiscogsCredit: View {
 
     private var line: some View {
         HStack(spacing: 4) {
+            // Tertiary: at secondary, the credit competed with the content it ends.
             Text("Data provided by Discogs.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
             Link(destination: destination) {
                 HStack(spacing: 2) {
                     Text("View")
@@ -71,8 +72,9 @@ struct DiscogsCredit: View {
                         .imageScale(.small)
                 }
             }
-            // Explicit: an iOS list row draws a link in the primary colour, like plain text.
-            .foregroundStyle(.tint)
+            // Explicit: an iOS list row draws a link in the primary colour, like plain text. Dimmed
+            // with the notice, but still the accent colour, so it still reads as a link.
+            .foregroundStyle(.tint.opacity(0.7))
             #if os(iOS)
             // A list row with one button-like control turns the whole row into that control, and
             // the row is stretched to fill the empty space below the list.
