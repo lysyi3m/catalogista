@@ -605,6 +605,51 @@ struct ImageCacheTests {
         #expect(!FileManager.default.fileExists(atPath: removed[0].deletingLastPathComponent().path))
     }
 
+    @Test("Discarding previews deletes those releases' images and keeps the rest")
+    func discardDeletesOnlyThoseReleases() async throws {
+        CountingProtocol.reset()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = makeCache(directory: directory)
+        try await cache.localURL(releaseID: 1, kind: .cover, remoteURL: URL(string: "https://i.discogs.com/c1.jpeg")!)
+        try await cache.localURL(releaseID: 2, kind: .cover, remoteURL: URL(string: "https://i.discogs.com/c2.jpeg")!)
+        try await cache.localURL(releaseID: 2, kind: .thumb, remoteURL: URL(string: "https://i.discogs.com/t2.jpeg")!)
+        let kept = try await cache.releaseImages(releaseID: 1, title: "Kept", remoteURLs: [URL(string: "https://i.discogs.com/1.jpeg")!])
+        let gone = try await cache.releaseImages(releaseID: 2, title: "Gone", remoteURLs: [URL(string: "https://i.discogs.com/2.jpeg")!])
+
+        await cache.discard(releaseIDs: [2])
+
+        #expect(await cache.isCached(releaseID: 1, kind: .cover))
+        #expect(FileManager.default.fileExists(atPath: kept[0].path))
+        #expect(await cache.isCached(releaseID: 2, kind: .cover) == false)
+        #expect(await cache.isCached(releaseID: 2, kind: .thumb) == false)
+        #expect(!FileManager.default.fileExists(atPath: gone[0].deletingLastPathComponent().path))
+    }
+
+    @Test("Discarding previews stops their downloads, so none lands afterwards")
+    func discardStopsDownloadsInFlight() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SlowProtocol.self]
+        let directory = temporaryDirectory()
+        let cache = ImageCache(directory: directory, session: URLSession(configuration: configuration))
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cover = Task {
+            try await cache.localURL(releaseID: 7, kind: .cover, remoteURL: URL(string: "https://discard.test/c7.jpeg")!)
+        }
+        let images = Task {
+            try await cache.releaseImages(releaseID: 7, title: "Preview", remoteURLs: [URL(string: "https://discard.test/7.jpeg")!])
+        }
+        try await Task.sleep(for: .milliseconds(120))
+
+        await cache.discard(releaseIDs: [7])
+
+        _ = try? await cover.value
+        _ = try? await images.value
+        #expect(await cache.statistics().fileCount == 0, "a download that outlived the discard would leave its image")
+    }
+
     @Test("Opening the images fails only when none can be fetched")
     func releaseImagesFailOnlyWhenAllFail() async throws {
         CountingProtocol.reset()

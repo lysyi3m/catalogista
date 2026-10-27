@@ -162,14 +162,15 @@ actor CollectionStore {
         try cachedReleaseDetail(releaseID: releaseID)?.snapshot
     }
 
+    /// - Parameter fetchedAt: when the release came from Discogs, which its freshness counts from.
     @discardableResult
-    func upsertReleaseDetail(_ release: Release) throws -> ReleaseDetailSnapshot {
+    func upsertReleaseDetail(_ release: Release, fetchedAt: Date = .now) throws -> ReleaseDetailSnapshot {
         let cached: CachedReleaseDetail
         if let existing = try cachedReleaseDetail(releaseID: release.id) {
-            existing.update(from: release)
+            existing.update(from: release, fetchedAt: fetchedAt)
             cached = existing
         } else {
-            cached = CachedReleaseDetail(from: release)
+            cached = CachedReleaseDetail(from: release, fetchedAt: fetchedAt)
             modelContext.insert(cached)
         }
         try saveOrRollback()

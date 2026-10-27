@@ -19,8 +19,7 @@ struct ReleaseHeader: View {
     /// Reports the title's lower edge in the scroll view's coordinates, so a page can put the
     /// title in its navigation bar once it scrolls out of view.
     var onTitleBottomChange: ((CGFloat) -> Void)?
-    /// Makes the cover open the release's images. The record page sets it; the add confirmation
-    /// does not.
+    /// Makes the cover open the release's images.
     var gallery: CoverGallery?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass

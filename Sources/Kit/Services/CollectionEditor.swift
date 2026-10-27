@@ -54,10 +54,14 @@ final class CollectionEditor {
     /// `instance_id` from the response. A release fetch afterwards, in the background, replaces the
     /// search-derived artist and title with Discogs' own; that refinement is best-effort, because
     /// the add itself has already succeeded by then.
+    ///
+    /// - Parameter fetched: the release as the add confirmation fetched it, and when. Stored in
+    ///   place of that release fetch, so the new record's page opens with its details.
     @discardableResult
     func add(
         _ result: SearchResult,
-        folderID: Int = DiscogsFolder.uncategorized
+        folderID: Int = DiscogsFolder.uncategorized,
+        fetched: (release: Release, at: Date)? = nil
     ) async -> Bool {
         guard !isWorking, let client = services.client else { return false }
         writesInFlight += 1
@@ -69,7 +73,7 @@ final class CollectionEditor {
             failure = Failure(
                 title: "Unable to Add “\(result.title)”",
                 message: error.localizedDescription,
-                retry: { [weak self] in _ = await self?.add(result, folderID: folderID) }
+                retry: { [weak self] in _ = await self?.add(result, folderID: folderID, fetched: fetched) }
             )
         }
 
@@ -116,7 +120,7 @@ final class CollectionEditor {
             }
             // Settled first: the sync below is how this add is judged, and must see Discogs as is.
             await services.store.settleWrites(touched)
-            return await reconcileAdd(of: result, folderID: folderID, knownCopies: copiesBefore, after: error)
+            return await reconcileAdd(of: result, folderID: folderID, fetched: fetched, generation: generation, knownCopies: copiesBefore, after: error)
         }
 
         // The copy is on the old account's Discogs; this cache no longer belongs to it.
@@ -133,6 +137,11 @@ final class CollectionEditor {
             return true
         }
 
+        // Stored before the sheet closes: a record page opened right after reads the cache once,
+        // before its first frame. A stale preview is fetched again instead.
+        if let fetched, await store(fetched, for: result, instanceID: addition.instanceID, generation: generation) {
+            return true
+        }
         // The add is done, so the sheet closes now rather than after one more request that may wait
         // on the rate limit. Held strongly: the sheet that owns this editor goes away on close.
         Task { await self.refine(releaseID: result.id, instanceID: addition.instanceID, client: client, generation: generation) }
@@ -327,6 +336,8 @@ final class CollectionEditor {
     private func reconcileAdd(
         of result: SearchResult,
         folderID: Int,
+        fetched: (release: Release, at: Date)?,
+        generation: Int,
         knownCopies: Set<Int>,
         after error: any Error
     ) async -> Bool {
@@ -341,12 +352,21 @@ final class CollectionEditor {
         let copiesNow = (try? await services.store.instanceIDs(ofRelease: result.id)) ?? []
         // A copy that was not there before this write is the add that landed. Merely finding the
         // release is not evidence: the user may have owned one all along.
-        if copiesNow.subtracting(knownCopies).isEmpty == false { return true }
+        let added = copiesNow.subtracting(knownCopies)
+        if let instanceID = added.first {
+            // The sync filled the copy in from Discogs; the preview adds its release details. A
+            // stale preview is fetched again, as after a confirmed add.
+            if let fetched, !(await store(fetched, for: result, instanceID: instanceID, generation: generation)),
+               let client = services.client {
+                Task { await self.refine(releaseID: result.id, instanceID: instanceID, client: client, generation: generation) }
+            }
+            return true
+        }
         // Verified absent, so a retry is safe to offer.
         failure = Failure(
             title: "Unable to Add “\(result.title)”",
             message: error.localizedDescription,
-            retry: { [weak self] in _ = await self?.add(result, folderID: folderID) }
+            retry: { [weak self] in _ = await self?.add(result, folderID: folderID, fetched: fetched) }
         )
         return false
     }
@@ -375,6 +395,21 @@ final class CollectionEditor {
         return false
     }
 
+
+    /// Stores the release the add confirmation fetched, in place of fetching it again. False when
+    /// the fetch is of another release or past `Freshness.maximumAge`; the caller fetches instead.
+    private func store(
+        _ fetched: (release: Release, at: Date),
+        for result: SearchResult,
+        instanceID: Int,
+        generation: Int
+    ) async -> Bool {
+        guard fetched.release.id == result.id, Freshness.isFresh(fetched.at) else { return false }
+        guard !hasDisconnected(since: generation) else { return true }
+        try? await services.store.apply(fetched.release, toInstanceID: instanceID)
+        _ = try? await services.store.upsertReleaseDetail(fetched.release, fetchedAt: fetched.at)
+        return true
+    }
 
     /// Best-effort accuracy pass. A failure here leaves the copy added with search-derived text,
     /// which the next full sync corrects anyway.

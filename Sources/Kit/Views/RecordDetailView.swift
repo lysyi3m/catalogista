@@ -1,5 +1,4 @@
 import DiscogsKit
-import QuickLook
 import SwiftData
 import SwiftUI
 
@@ -20,15 +19,10 @@ struct RecordDetailView: View {
     @State private var loader: ReleaseDetailLoader?
     @State private var editor: CollectionEditor?
     @State private var isConfirmingRemoval = false
-    @State private var isTracklistExpanded = true
     /// The visible height. A short page is stretched to it, which keeps the credit on the bottom
     /// edge. See `creditViewport(_:)`.
     @State private var viewportHeight: CGFloat = 0
-    @State private var isLoadingImages = false
-    /// The release's images on disk, and the one Quick Look shows. Quick Look opens when it is set.
-    @State private var imageFiles: [URL] = []
-    @State private var previewedImage: URL?
-    @State private var imagesFailed = false
+    @State private var images = ReleaseImages()
     #if os(iOS)
     /// Whether the page's title has scrolled under the navigation bar. Until it has, the bar stays
     /// empty rather than repeat it.
@@ -82,15 +76,9 @@ struct RecordDetailView: View {
                             }
                         )
                     }
-                    tracklist
-                    notes
+                    ReleaseSections(loader: loader, releaseID: item.releaseID)
                     if let staleSince = loader?.staleSince {
-                        Label(
-                            "Details updated \(staleSince.formatted(.relative(presentation: .named)))",
-                            systemImage: "clock.arrow.circlepath"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        StaleDetailsLabel(since: staleSince)
                     }
                 }
                 Spacer(minLength: 0)
@@ -122,15 +110,10 @@ struct RecordDetailView: View {
                 )
             }
         }
-        .quickLookPreview($previewedImage, in: imageFiles)
+        .releaseImages(images)
         .onAppear { services.commands.recordPagesOnScreen += 1 }
         .onDisappear { services.commands.recordPagesOnScreen -= 1 }
         .onChange(of: services.commands.imagesRequests) { openImages() }
-        .alert("The images could not be loaded.", isPresented: $imagesFailed) {
-            Button("OK") {}
-        } message: {
-            Text("Check your connection and try again.")
-        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -193,30 +176,12 @@ struct RecordDetailView: View {
         return collection
     }
 
-    /// The release's images, the cover first. Until the release is fetched, the cover alone.
     private var imageSources: [URL] {
-        if let urls = detail?.imageURLs, !urls.isEmpty { return urls.compactMap(URL.init(string:)) }
-        return [coverSource.url].compactMap { $0.flatMap(URL.init(string:)) }
+        ReleaseImages.sources(detail: detail, cover: coverSource.url)
     }
 
     private func openImages() {
-        let sources = imageSources
-        guard !isLoadingImages, !sources.isEmpty else { return }
-        isLoadingImages = true
-        Task {
-            defer { isLoadingImages = false }
-            do {
-                imageFiles = try await services.imageCache.releaseImages(
-                    releaseID: item.releaseID,
-                    title: item.title,
-                    remoteURLs: sources
-                )
-                previewedImage = imageFiles.first
-            } catch is CancellationError {
-            } catch {
-                imagesFailed = true
-            }
-        }
+        images.open(releaseID: item.releaseID, title: item.title, sources: imageSources, imageCache: services.imageCache)
     }
 
     private var header: some View {
@@ -241,7 +206,7 @@ struct RecordDetailView: View {
                 updateTitleUnderBar()
                 #endif
             },
-            gallery: CoverGallery(count: imageSources.count, isLoading: isLoadingImages, open: openImages)
+            gallery: CoverGallery(count: imageSources.count, isLoading: images.isLoading, open: openImages)
         )
     }
 
@@ -253,116 +218,6 @@ struct RecordDetailView: View {
         if isUnder != isTitleUnderBar { isTitleUnderBar = isUnder }
     }
     #endif
-
-    // MARK: - Tracklist
-
-    @ViewBuilder
-    private var tracklist: some View {
-        DisclosureGroup(isExpanded: $isTracklistExpanded) {
-            tracklistContent
-                .padding(.top, 8)
-        } label: {
-            HStack(spacing: 8) {
-                Text("Tracklist").font(.pageHeading)
-                if let count = detail?.playableTracks.count {
-                    Text("\(count)")
-                        .foregroundStyle(.secondary)
-                }
-                if loader?.state == .loading {
-                    ProgressView().controlSize(.small)
-                }
-            }
-            #if os(iOS)
-            // The whole row toggles, not only the words and the chevron at either end.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-            #endif
-        }
-        #if os(iOS)
-        // Left to the accent colour, the section heading reads as a link rather than a heading.
-        .tint(.primary)
-        #endif
-    }
-
-    @ViewBuilder
-    private var notes: some View {
-        if let notes = detail?.notes, !notes.isEmpty {
-            // Named apart from a custom field the owner may also have called Notes, in Copy.
-            PageSection("Release Notes") {
-                NotesText(notes: DiscogsMarkup.attributed(notes))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var tracklistContent: some View {
-        switch loader?.state {
-        case .loaded(let snapshot) where !snapshot.tracks.isEmpty:
-            VStack(alignment: .leading, spacing: 0) {
-                // By position in the list: position and title together are not unique — a release
-                // can repeat an unnumbered heading, and repeated ids make SwiftUI reuse rows.
-                ForEach(Array(snapshot.tracks.enumerated()), id: \.offset) { index, track in
-                    TrackRow(track: track)
-                    if index < snapshot.tracks.count - 1 { Divider() }
-                }
-            }
-        case .loaded:
-            Text("No tracklist on Discogs")
-                .foregroundStyle(.secondary)
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 8) {
-                Text(message).foregroundStyle(.red)
-                Button("Try Again") {
-                    Task { await loader?.load(releaseID: item.releaseID) }
-                }
-            }
-        case .loading, nil:
-            Text("Loading details…")
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct TrackRow: View {
-    let track: CachedTrack
-    /// Grows with the text size, so a position such as "A10" stays on one line.
-    @ScaledMetric(relativeTo: Self.supportingTextStyle) private var positionWidth: CGFloat = 44
-
-    var body: some View {
-        if track.isTrack {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(track.position)
-                    .font(Self.supportingFont)
-                    .foregroundStyle(.secondary)
-                    .frame(width: positionWidth, alignment: .leading)
-                Text(track.title)
-                    .textSelection(.enabled)
-                Spacer(minLength: 8)
-                if !track.duration.isEmpty {
-                    // Monospaced digits keep the column's right edge straight.
-                    Text(track.duration)
-                        .font(Self.supportingFont)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, 6)
-        } else {
-            Text(track.title)
-                .fontWeight(.semibold)
-                .textSelection(.enabled)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-        }
-    }
-
-    #if os(iOS)
-    /// One step under the title: at body size a position and a duration compete with it.
-    private static let supportingTextStyle = Font.TextStyle.subheadline
-    #else
-    private static let supportingTextStyle = Font.TextStyle.body
-    #endif
-    private static let supportingFont = Font.system(supportingTextStyle)
 }
 
 #if os(iOS)
